@@ -13,7 +13,6 @@ Affected is everything, which includes `utmp.h`, `lastlog.h`, accesses [/run/utm
 * [getutline()](https://manpages.opensuse.org/getutline.3) (ABI breakage)
 * [getutline_r()](https://manpages.opensuse.org/getutline_r.3) (ABI breakage)
 * [login()](https://manpages.opensuse.org/login.3) (ABI breakage)
-* [logout()](https://manpages.opensuse.org/logout.3) (internal only)
 * [pututline()](https://manpages.opensuse.org/pututline.3) (ABI breakage)
 * [updwtmp()](https://manpages.opensuse.org/updwtmp.3) (ABI breakage, WTMP file name)
 * [utmpname()](https://manpages.opensuse.org/utmpname.3) (UTMP file name/_PATH_UTMP)
@@ -21,6 +20,7 @@ Affected is everything, which includes `utmp.h`, `lastlog.h`, accesses [/run/utm
 Safe functions from `utmp.h`:
 * [endutent()](https://manpages.opensuse.org/endutent.3)
 * [login_tty()](https://manpages.opensuse.org/login_tty.3)
+* [logout()](https://manpages.opensuse.org/logout.3)
 * [logwtmp()](https://manpages.opensuse.org/logwtmp.3)
 * [setutent()](https://manpages.opensuse.org/setutent.3)
 

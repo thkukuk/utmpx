@@ -1,0 +1,87 @@
+diff --git a/src/users.c b/src/users.c
+index 86bd1b1f4..2a8bee354 100644
+--- a/src/users.c
++++ b/src/users.c
+@@ -22,6 +22,8 @@
+ #include <sys/types.h>
+ #include "system.h"
+ 
++#include <systemd/sd-login.h>
++
+ #include "die.h"
+ #include "error.h"
+ #include "long-options.h"
+@@ -78,21 +80,65 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
+   free (u);
+ }
+ 
++static void
++list_entries_users_logind (int n_entries, char **sessions_list)
++{
++  char **u = xnmalloc (n_entries, sizeof *u);
++  int i, r;
++
++  for (i = 0; i < n_entries; i++)
++    {
++      char *name;
++      if ((r = sd_session_get_username(sessions_list[i], &name)) < 0)
++        {
++          fprintf(stderr, "get_user failed: %s\n", strerror (-r));
++        }
++      u[i] = name;
++    }
++
++  qsort (u, n_entries, sizeof (u[0]), userid_compare);
++
++  for (i = 0; i < n_entries; i++)
++    {
++      char c = (i < n_entries - 1 ? ' ' : '\n');
++      fputs (u[i], stdout);
++      putchar (c);
++    }
++
++  for (i = 0; i < n_entries; i++)
++    free (u[i]);
++  free (u);
++}
++
+ /* Display a list of users on the system, according to utmp file FILENAME.
+    Use read_utmp OPTIONS to read FILENAME.  */
+ 
+ static void
+ users (char const *filename, int options)
+ {
+-  size_t n_users;
+-  STRUCT_UTMP *utmp_buf;
++  char **sessions_list;
++  int n_sessions = sd_get_sessions(&sessions_list);
++  int i;
+ 
+-  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
+-    die (EXIT_FAILURE, errno, "%s", quotef (filename));
+-
+-  list_entries_users (n_users, utmp_buf);
+-
+-  free (utmp_buf);
++  if (n_sessions >= 0)
++    {
++      list_entries_users_logind (n_sessions, sessions_list);
++      for (i = 0;  i < n_sessions; i++)
++	free(sessions_list[i]);
++      free(sessions_list);
++    }
++  else
++    {
++      size_t n_users;
++      STRUCT_UTMP *utmp_buf;
++      
++      if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
++	die (EXIT_FAILURE, errno, "%s", quotef (filename));
++      
++      list_entries_users (n_users, utmp_buf);
++      
++      free (utmp_buf);
++    }
+ }
+ 
+ void

@@ -1,5 +1,5 @@
 diff --git a/src/users.c b/src/users.c
-index 86bd1b1f4..2a8bee354 100644
+index 86bd1b1f4..ed6feb38d 100644
 --- a/src/users.c
 +++ b/src/users.c
 @@ -22,6 +22,8 @@
@@ -11,7 +11,7 @@ index 86bd1b1f4..2a8bee354 100644
  #include "die.h"
  #include "error.h"
  #include "long-options.h"
-@@ -78,21 +80,65 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
+@@ -78,21 +80,63 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
    free (u);
  }
  
@@ -24,10 +24,8 @@ index 86bd1b1f4..2a8bee354 100644
 +  for (i = 0; i < n_entries; i++)
 +    {
 +      char *name;
-+      if ((r = sd_session_get_username(sessions_list[i], &name)) < 0)
-+        {
-+          fprintf(stderr, "get_user failed: %s\n", strerror (-r));
-+        }
++      if ((r = sd_session_get_username (sessions_list[i], &name)) < 0)
++        die (EXIT_FAILURE, -r, _("couldn't get user name"));
 +      u[i] = name;
 +    }
 +
@@ -54,7 +52,7 @@ index 86bd1b1f4..2a8bee354 100644
 -  size_t n_users;
 -  STRUCT_UTMP *utmp_buf;
 +  char **sessions_list;
-+  int n_sessions = sd_get_sessions(&sessions_list);
++  int n_sessions = sd_get_sessions (&sessions_list);
 +  int i;
  
 -  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
@@ -67,8 +65,8 @@ index 86bd1b1f4..2a8bee354 100644
 +    {
 +      list_entries_users_logind (n_sessions, sessions_list);
 +      for (i = 0;  i < n_sessions; i++)
-+	free(sessions_list[i]);
-+      free(sessions_list);
++	free (sessions_list[i]);
++      free (sessions_list);
 +    }
 +  else
 +    {

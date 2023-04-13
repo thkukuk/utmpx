@@ -1,20 +1,23 @@
 diff --git a/src/users.c b/src/users.c
-index 86bd1b1f4..ed6feb38d 100644
+index 86bd1b1f4..047ee76b6 100644
 --- a/src/users.c
 +++ b/src/users.c
-@@ -22,6 +22,8 @@
+@@ -22,6 +22,10 @@
  #include <sys/types.h>
  #include "system.h"
  
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +#include <systemd/sd-login.h>
++#endif
 +
  #include "die.h"
  #include "error.h"
  #include "long-options.h"
-@@ -78,21 +80,63 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
+@@ -78,21 +82,67 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
    free (u);
  }
  
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +static void
 +list_entries_users_logind (int n_entries, char **sessions_list)
 +{
@@ -42,6 +45,7 @@ index 86bd1b1f4..ed6feb38d 100644
 +    free (u[i]);
 +  free (u);
 +}
++#endif
 +
  /* Display a list of users on the system, according to utmp file FILENAME.
     Use read_utmp OPTIONS to read FILENAME.  */
@@ -51,35 +55,47 @@ index 86bd1b1f4..ed6feb38d 100644
  {
 -  size_t n_users;
 -  STRUCT_UTMP *utmp_buf;
-+  char **sessions_list;
-+  int n_sessions = sd_get_sessions (&sessions_list);
-+  int i;
- 
--  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
--    die (EXIT_FAILURE, errno, "%s", quotef (filename));
--
--  list_entries_users (n_users, utmp_buf);
--
--  free (utmp_buf);
-+  if (n_sessions >= 0)
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (filename == NULL)
 +    {
++      char **sessions_list;
++      int n_sessions = sd_get_sessions (&sessions_list);
++      int i;
++
 +      list_entries_users_logind (n_sessions, sessions_list);
 +      for (i = 0;  i < n_sessions; i++)
 +	free (sessions_list[i]);
 +      free (sessions_list);
 +    }
 +  else
++#endif
 +    {
 +      size_t n_users;
 +      STRUCT_UTMP *utmp_buf;
-+      
+ 
+-  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
+-    die (EXIT_FAILURE, errno, "%s", quotef (filename));
 +      if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
 +	die (EXIT_FAILURE, errno, "%s", quotef (filename));
-+      
+ 
+-  list_entries_users (n_users, utmp_buf);
 +      list_entries_users (n_users, utmp_buf);
-+      
+ 
+-  free (utmp_buf);
 +      free (utmp_buf);
 +    }
  }
  
  void
+@@ -134,7 +184,11 @@ main (int argc, char **argv)
+   switch (argc - optind)
+     {
+     case 0:			/* users */
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++      users (NULL, 0);
++#else
+       users (UTMP_FILE, READ_UTMP_CHECK_PIDS);
++#endif
+       break;
+ 
+     case 1:			/* users <utmp file> */

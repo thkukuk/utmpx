@@ -1,23 +1,23 @@
 diff --git a/src/pinky.c b/src/pinky.c
-index 79317dc34..bfd6a0f92 100644
+index 79317dc34..44522320d 100644
 --- a/src/pinky.c
 +++ b/src/pinky.c
-@@ -21,6 +21,9 @@
+@@ -21,6 +21,10 @@
  #include <pwd.h>
  #include <stdio.h>
  
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +#include <systemd/sd-login.h>
-+#define USE_LOGIND 1
++#endif
 +
  #include <sys/types.h>
  #include "system.h"
  
-@@ -171,6 +174,148 @@ idle_string (time_t when)
+@@ -171,6 +175,147 @@ idle_string (time_t when)
    return buf;
  }
  
-+#ifdef USE_LOGIND
-+
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +/* Return a time string.  */
 +static char const *
 +time_string (const char *session)
@@ -29,7 +29,7 @@ index 79317dc34..bfd6a0f92 100644
 +  if ((r = sd_session_get_start_time (session, &time)) < 0)
 +    die (EXIT_FAILURE, -r, _("Couldn't get start time of session"));
 +
-+  time_t t = time /(uint64_t) 1000000ULL; 
++  time_t t = time /(uint64_t) 1000000ULL;
 +  struct tm *tmp = localtime (&t);
 +
 +  if (tmp)
@@ -67,7 +67,7 @@ index 79317dc34..bfd6a0f92 100644
 +  char line[/* strlen(tty)*/ 50 + DEV_DIR_LEN + 1];
 +  char *p = line;
 +
-+  
++
 +  /* Copy tty into LINE, prepending '/dev/' if tty is not
 +     already an absolute file name. sytemd normally never
 +     uses the absolute file name. */
@@ -150,7 +150,7 @@ index 79317dc34..bfd6a0f92 100644
 +
 +      if (host != remote_host)
 +        free (host);
-+      
++
 +      free (remote_host);
 +    }
 +
@@ -173,13 +173,13 @@ index 79317dc34..bfd6a0f92 100644
  }
  
  /* Display UTMP_BUF, which should have N entries. */
-+#ifdef USE_LOGIND
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +static void
 +short_pinky (const int argc_names, char *const argv_names[])
 +{
 +  char **sessions_list = NULL;
 +  int sessions;
-+  
++
 +  if (hard_locale (LC_TIME))
 +    {
 +      time_format = "%Y-%m-%d %H:%M";
@@ -228,7 +228,7 @@ index 79317dc34..bfd6a0f92 100644
      }
  
    if (do_short_format)
-+#ifdef USE_LOGIND
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +    short_pinky (n_users, argv + optind);
 +#else
      short_pinky (UTMP_FILE, n_users, argv + optind);

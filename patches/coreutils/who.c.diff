@@ -1,5 +1,5 @@
 diff --git a/src/who.c b/src/who.c
-index 06e1ab0f6..616e4a1b9 100644
+index 06e1ab0f6..947d7d55c 100644
 --- a/src/who.c
 +++ b/src/who.c
 @@ -28,6 +28,10 @@
@@ -13,7 +13,32 @@ index 06e1ab0f6..616e4a1b9 100644
  #include <sys/types.h>
  #include "system.h"
  
-@@ -557,6 +561,34 @@ list_entries_who (size_t n, const STRUCT_UTMP *utmp_buf)
+@@ -237,6 +241,24 @@ time_string (const STRUCT_UTMP *utmp_ent)
+     return timetostr (t, buf);
+ }
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++/* Return a time string.  */
++static char const *
++time_string_logind (time_t t)
++{
++  static char buf[INT_STRLEN_BOUND (intmax_t) + sizeof "-%m-%d %H:%M"];
++  struct tm *tmp = localtime (&t);
++
++  if (tmp)
++    {
++      strftime (buf, sizeof buf, time_format, tmp);
++      return buf;
++    }
++  else
++    return timetostr (t, buf);
++}
++#endif
++
+ /* Print formatted output line. Uses mostly arbitrary field sizes, probably
+    will need tweaking if any of the localization stuff is done, or for 64 bit
+    pids, etc. */
+@@ -557,6 +579,34 @@ list_entries_who (size_t n, const STRUCT_UTMP *utmp_buf)
    printf (_("\n# users=%lu\n"), entries);
  }
  
@@ -48,7 +73,7 @@ index 06e1ab0f6..616e4a1b9 100644
  static void
  print_heading (void)
  {
-@@ -615,23 +647,160 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
+@@ -615,23 +665,168 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
      }
  }
  
@@ -80,13 +105,19 @@ index 06e1ab0f6..616e4a1b9 100644
 +      char *name;
 +      char *tty;
 +      int r;
++      uid_t uid;
++      uint64_t usec = 0;
 +
 +      if ((r = sd_session_get_username (sessions_list[i], &name)) < 0)
 +	die (EXIT_FAILURE, -r, _("couldn't get user name"));
++      if ((r = sd_session_get_uid (sessions_list[i], &uid)) < 0)
++	die (EXIT_FAILURE, -r, _("couldn't get user ID"));
 +      if ((r = sd_session_get_tty (sessions_list[i], &tty)) < 0)
 +	tty = strdup ("");
 +      if ((r = sd_session_get_remote_host (sessions_list[i], &host)) < 0)
 +	host = NULL;
++      if (sd_uid_get_login_time(uid, &usec) < 0)
++	die (EXIT_FAILURE, -r, _("couldn't get login time"));
 +
 +      if (!my_line_only
 +          || STREQ (ttyname_b, tty))
@@ -130,9 +161,11 @@ index 06e1ab0f6..616e4a1b9 100644
 +		  sprintf (hoststr, "(%s)", host);
 +		}
 +
++#define USEC_PER_SEC  ((uint64_t) 1000000ULL)
 +	      print_line (strlen (name), name, mesg,
 +			  strlen (tty), tty,
-+			  "time", idlestr, "", hoststr ? hoststr : "", "");
++			  time_string_logind (usec/USEC_PER_SEC),
++			  idlestr, "", hoststr ? hoststr : "", "");
 +	      if (hoststr)
 +		free (hoststr);
 +	    }
@@ -218,7 +251,7 @@ index 06e1ab0f6..616e4a1b9 100644
  }
  
  void
-@@ -820,7 +989,11 @@ main (int argc, char **argv)
+@@ -820,7 +1015,11 @@ main (int argc, char **argv)
        FALLTHROUGH;
      case -1:
      case 0:			/* who */

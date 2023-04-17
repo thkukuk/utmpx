@@ -51,7 +51,6 @@ diff -ur openssh-8.9p1.old/configure.ac openssh-8.9p1/configure.ac
  AUDIT_MODULE=none
  AC_ARG_WITH([audit],
  	[  --with-audit=module     Enable audit support (modules=debug,bsm,linux)],
-Nur in openssh-8.9p1: configure.ac~.
 diff -ur openssh-8.9p1.old/loginrec.c openssh-8.9p1/loginrec.c
 --- openssh-8.9p1.old/loginrec.c	2022-02-23 12:31:11.000000000 +0100
 +++ openssh-8.9p1/loginrec.c	2023-04-17 15:09:20.841273407 +0200
@@ -95,29 +94,6 @@ diff -ur openssh-8.9p1.old/loginrec.c openssh-8.9p1/loginrec.c
  	li->type = LTYPE_LOGOUT;
  	return (login_write(li));
  }
-@@ -1547,10 +1564,10 @@
- 		strlcpy(last.ll_host, li->hostname,
- 		    MIN_SIZEOF(last.ll_host, li->hostname));
- 		last.ll_time = li->tv_sec;
--	
-+
- 		if (!lastlog_openseek(li, &fd, O_RDWR|O_CREAT))
- 			return (0);
--	
-+
- 		/* write the entry */
- 		if (atomicio(vwrite, fd, &last, sizeof(last)) != sizeof(last)) {
- 			close(fd);
-@@ -1558,7 +1575,7 @@
- 			    LASTLOG_FILE, strerror(errno));
- 			return (0);
- 		}
--	
-+
- 		close(fd);
- 		return (1);
- 	default:
-Nur in openssh-8.9p1: loginrec.c~.
 diff -ur openssh-8.9p1.old/loginrec.h openssh-8.9p1/loginrec.h
 --- openssh-8.9p1.old/loginrec.h	2022-02-23 12:31:11.000000000 +0100
 +++ openssh-8.9p1/loginrec.h	2023-04-17 14:58:20.808850750 +0200
@@ -131,7 +107,6 @@ diff -ur openssh-8.9p1.old/loginrec.h openssh-8.9p1/loginrec.h
  }; /* struct logininfo */
  
  /*
-Nur in openssh-8.9p1: loginrec.h~.
 diff -ur openssh-8.9p1.old/Makefile.in openssh-8.9p1/Makefile.in
 --- openssh-8.9p1.old/Makefile.in	2022-02-23 12:31:11.000000000 +0100
 +++ openssh-8.9p1/Makefile.in	2023-04-17 14:44:32.156538001 +0200

@@ -1,0 +1,154 @@
+diff -ur openssh-8.9p1.old/configure.ac openssh-8.9p1/configure.ac
+--- openssh-8.9p1.old/configure.ac	2022-02-23 12:31:11.000000000 +0100
++++ openssh-8.9p1/configure.ac	2023-04-17 14:52:21.499002203 +0200
+@@ -1703,6 +1703,49 @@
+ 	fi ]
+ )
+ 
++# Check whether user wants wtmpdb support
++WTMPDB_MSG="no"
++AC_ARG_WITH([wtmpdb],
++	[  --with-wtmpdb[[=PATH]]   Enable wtmpdb support for sshd],
++	[ if test "x$withval" != "xno" ; then
++		if test "x$withval" = "xyes" ; then
++			AC_PATH_TOOL([PKGCONFIG], [pkg-config], [no])
++			if test "x$PKGCONFIG" != "xno"; then
++				AC_MSG_CHECKING([if $PKGCONFIG knows about wtmpdb])
++				if "$PKGCONFIG" libwtmpdb; then
++					AC_MSG_RESULT([yes])
++					use_pkgconfig_for_libwtmpdb=yes
++				else
++					AC_MSG_RESULT([no])
++				fi
++			fi
++		else
++			CPPFLAGS="$CPPFLAGS -I${withval}/include"
++			if test -n "${rpath_opt}"; then
++				LDFLAGS="-L${withval}/lib ${rpath_opt}${withval}/lib ${LDFLAGS}"
++			else
++				LDFLAGS="-L${withval}/lib ${LDFLAGS}"
++			fi
++		fi
++		if test "x$use_pkgconfig_for_libwtmpdb" = "xyes"; then
++			LIBWTMPDB=`$PKGCONFIG --libs libwtmpdb`
++			CPPFLAGS="$CPPFLAGS `$PKGCONFIG --cflags libwtmpdb`"
++		else
++			LIBWTMPDB="-lwtmpdb"
++		fi
++		OTHERLIBS=`echo $LIBWTMPDB | sed 's/-lwtmpdb//'`
++		AC_CHECK_LIB([wtmpdb], [wtmpdb_login],
++			[ AC_DEFINE([USE_WTMPDB], [1], [Use libwtmpdb for sshd])
++			  WTMPDB_MSG="yes"
++			  AC_SUBST([LIBWTMPDB])
++			],
++			[ AC_MSG_ERROR([libwtmpdb not found]) ],
++			[ $OTHERLIBS ]
++		)
++	fi ]
++)
++
++
+ AUDIT_MODULE=none
+ AC_ARG_WITH([audit],
+ 	[  --with-audit=module     Enable audit support (modules=debug,bsm,linux)],
+Nur in openssh-8.9p1: configure.ac~.
+diff -ur openssh-8.9p1.old/loginrec.c openssh-8.9p1/loginrec.c
+--- openssh-8.9p1.old/loginrec.c	2022-02-23 12:31:11.000000000 +0100
++++ openssh-8.9p1/loginrec.c	2023-04-17 15:09:20.841273407 +0200
+@@ -187,6 +187,10 @@
+ # include <util.h>
+ #endif
+ 
++#ifdef USE_WTMPDB
++# include <wtmpdb.h>
++#endif
++
+ /**
+  ** prototypes for helper functions in this file
+  **/
+@@ -236,7 +240,15 @@
+ int
+ login_login(struct logininfo *li)
+ {
+-	li->type = LTYPE_LOGIN;
++#ifdef USE_WTMPDB
++	usec_t login_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
++
++	li->wtmpdb_id = wtmpdb_login(NULL, USER_PROCESS, li->username, login_time,
++				     li->line, li->hostname, 0, 0);
++	if (li->wtmpdb_id < 0)
++	        return 0;
++#endif
++ 	li->type = LTYPE_LOGIN;
+ 	return (login_write(li));
+ }
+ 
+@@ -253,6 +265,11 @@
+ int
+ login_logout(struct logininfo *li)
+ {
++#ifdef USE_WTMPDB
++	usec_t logout_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
++
++	wtmpdb_logout(NULL, li->wtmpdb_id, logout_time, NULL);
++#endif
+ 	li->type = LTYPE_LOGOUT;
+ 	return (login_write(li));
+ }
+@@ -1547,10 +1564,10 @@
+ 		strlcpy(last.ll_host, li->hostname,
+ 		    MIN_SIZEOF(last.ll_host, li->hostname));
+ 		last.ll_time = li->tv_sec;
+-	
++
+ 		if (!lastlog_openseek(li, &fd, O_RDWR|O_CREAT))
+ 			return (0);
+-	
++
+ 		/* write the entry */
+ 		if (atomicio(vwrite, fd, &last, sizeof(last)) != sizeof(last)) {
+ 			close(fd);
+@@ -1558,7 +1575,7 @@
+ 			    LASTLOG_FILE, strerror(errno));
+ 			return (0);
+ 		}
+-	
++
+ 		close(fd);
+ 		return (1);
+ 	default:
+Nur in openssh-8.9p1: loginrec.c~.
+diff -ur openssh-8.9p1.old/loginrec.h openssh-8.9p1/loginrec.h
+--- openssh-8.9p1.old/loginrec.h	2022-02-23 12:31:11.000000000 +0100
++++ openssh-8.9p1/loginrec.h	2023-04-17 14:58:20.808850750 +0200
+@@ -79,6 +79,9 @@
+ 	unsigned int tv_sec;
+ 	unsigned int tv_usec;
+ 	union login_netinfo hostaddr;       /* caller's host address(es) */
++#ifdef USE_WTMPDB
++	int64_t wtmpdb_id;                  /* ID for wtmpdb_logout */
++#endif
+ }; /* struct logininfo */
+ 
+ /*
+Nur in openssh-8.9p1: loginrec.h~.
+diff -ur openssh-8.9p1.old/Makefile.in openssh-8.9p1/Makefile.in
+--- openssh-8.9p1.old/Makefile.in	2022-02-23 12:31:11.000000000 +0100
++++ openssh-8.9p1/Makefile.in	2023-04-17 14:44:32.156538001 +0200
+@@ -55,6 +55,7 @@
+ SSHDLIBS=@SSHDLIBS@
+ LIBEDIT=@LIBEDIT@
+ LIBFIDO2=@LIBFIDO2@
++LIBWTMPDB=@LIBWTMPDB@
+ AR=@AR@
+ AWK=@AWK@
+ RANLIB=@RANLIB@
+@@ -212,7 +213,7 @@
+ 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(GSSLIBS)
+ 
+ sshd$(EXEEXT): libssh.a	$(LIBCOMPAT) $(SSHDOBJS)
+-	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
++	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS) $(LIBWTMPDB)
+ 
+ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
+ 	$(LD) -o $@ $(SCP_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)

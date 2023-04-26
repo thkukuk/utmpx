@@ -53,7 +53,7 @@ diff -ur openssh-8.9p1.old/configure.ac openssh-8.9p1/configure.ac
  	[  --with-audit=module     Enable audit support (modules=debug,bsm,linux)],
 diff -ur openssh-8.9p1.old/loginrec.c openssh-8.9p1/loginrec.c
 --- openssh-8.9p1.old/loginrec.c	2022-02-23 12:31:11.000000000 +0100
-+++ openssh-8.9p1/loginrec.c	2023-04-17 15:09:20.841273407 +0200
++++ openssh-8.9p1/loginrec.c	2023-04-18 10:05:04.311193333 +0200
 @@ -187,6 +187,10 @@
  # include <util.h>
  #endif
@@ -65,35 +65,91 @@ diff -ur openssh-8.9p1.old/loginrec.c openssh-8.9p1/loginrec.c
  /**
   ** prototypes for helper functions in this file
   **/
-@@ -236,7 +240,15 @@
- int
- login_login(struct logininfo *li)
- {
--	li->type = LTYPE_LOGIN;
+@@ -207,6 +211,9 @@
+ int wtmpx_write_entry(struct logininfo *li);
+ int lastlog_write_entry(struct logininfo *li);
+ int syslogin_write_entry(struct logininfo *li);
 +#ifdef USE_WTMPDB
-+	usec_t login_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
-+
-+	li->wtmpdb_id = wtmpdb_login(NULL, USER_PROCESS, li->username, login_time,
-+				     li->line, li->hostname, 0, 0);
-+	if (li->wtmpdb_id < 0)
-+	        return 0;
++int wtmpdb_write_entry(struct logininfo *li);
 +#endif
-+ 	li->type = LTYPE_LOGIN;
- 	return (login_write(li));
- }
  
-@@ -253,6 +265,11 @@
- int
- login_logout(struct logininfo *li)
- {
+ int getlast_entry(struct logininfo *li);
+ int lastlog_get_entry(struct logininfo *li);
+@@ -467,6 +474,9 @@
+ #ifdef USE_WTMPX
+ 	wtmpx_write_entry(li);
+ #endif
 +#ifdef USE_WTMPDB
-+	usec_t logout_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
-+
-+	wtmpdb_logout(NULL, li->wtmpdb_id, logout_time, NULL);
++	wtmpdb_write_entry(li);
 +#endif
- 	li->type = LTYPE_LOGOUT;
- 	return (login_write(li));
+ #ifdef CUSTOM_SYS_AUTH_RECORD_LOGIN
+ 	if (li->type == LTYPE_LOGIN &&
+ 	    !sys_auth_record_login(li->username,li->hostname,li->line,
+@@ -1409,6 +1419,64 @@
  }
+ #endif /* USE_WTMPX */
+ 
++#ifdef USE_WTMPDB
++static int
++wtmpdb_perform_login(struct logininfo *li)
++{
++	uint64_t login_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
++	const char *tty;
++
++	if (strncmp(li->line, "/dev/", 5) == 0)
++		tty = &(li->line[5]);
++	else
++		tty = li->line;
++
++	li->wtmpdb_id = wtmpdb_login(NULL, USER_PROCESS, li->username,
++				     login_time, tty, li->hostname, 0, 0);
++	if (li->wtmpdb_id < 0)
++		return (0);
++
++	return (1);
++}
++
++
++static int
++wtmpdb_perform_logout(struct logininfo *li)
++{
++	uint64_t logout_time = li->tv_sec * USEC_PER_SEC + li->tv_usec;
++
++	if (li->wtmpdb_id == 0) {
++		const char *tty;
++
++	  if (strncmp(li->line, "/dev/", 5) == 0)
++		tty = &(li->line[5]);
++	  else
++		tty = li->line;
++
++	  li->wtmpdb_id = wtmpdb_get_id(NULL, tty, NULL);
++	}
++	wtmpdb_logout(NULL, li->wtmpdb_id, logout_time, NULL);
++
++	return (1);
++}
++
++
++int
++wtmpdb_write_entry(struct logininfo *li)
++{
++	switch(li->type) {
++	case LTYPE_LOGIN:
++		return (wtmpdb_perform_login(li));
++	case LTYPE_LOGOUT:
++		return (wtmpdb_perform_logout(li));
++	default:
++		logit("%s: invalid type field", __func__);
++		return (0);
++	}
++}
++#endif
++
++
+ /**
+  ** Low-level libutil login() functions
+  **/
 diff -ur openssh-8.9p1.old/loginrec.h openssh-8.9p1/loginrec.h
 --- openssh-8.9p1.old/loginrec.h	2022-02-23 12:31:11.000000000 +0100
 +++ openssh-8.9p1/loginrec.h	2023-04-17 14:58:20.808850750 +0200

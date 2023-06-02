@@ -1,0 +1,7 @@
+LIBUTMPLD_0.1 {
+  global:
+    utmpld_get_session_id;
+    utmpld_set_tty;
+  local:
+    *;
+};

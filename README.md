@@ -7,4 +7,4 @@ This repository contains the document with all background informations and patch
 Packages for which patches exist:
 * [coreutils](patches/coreutils/)
 * [openssh](patches/openssh/)
-* [procps-ng](patches/procps-ng/)
+* [procps-ng (3.3.17/4.0.3)](patches/procps-ng/)

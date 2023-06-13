@@ -8,3 +8,4 @@ Packages for which patches exist:
 * [coreutils](patches/coreutils/)
 * [openssh](patches/openssh/)
 * [procps-ng (3.3.17/4.0.3)](patches/procps-ng/)
+* [util-linux](patches/util-linux/)

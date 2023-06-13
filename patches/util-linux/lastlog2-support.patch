@@ -1,0 +1,267 @@
+From 09ddf7494c30590adc0fb3ca75ff4c970ee8da4a Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Fri, 14 Apr 2023 14:57:10 +0200
+Subject: [PATCH] lslogins: Add support for lastlog2 (#2088)
+
+lastlog2 is a Y2038 safe implementation of lastlog.
+
+Signed-off-by: Thorsten Kukuk <kukuk@suse.com>
+---
+ configure.ac              | 16 +++++++
+ login-utils/Makemodule.am |  4 ++
+ login-utils/lslogins.c    | 87 +++++++++++++++++++++++++++++++++++++--
+ meson.build               |  8 +++-
+ meson_options.txt         |  1 +
+ 5 files changed, 111 insertions(+), 5 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index fbe735a3cc..fc29aa65c3 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2545,6 +2545,22 @@ AS_IF([test "x$with_vendordir" != x], [
+   AC_DEFINE([USE_VENDORDIR], [1], [Define to 1 to use vendordir])
+ ])
+ 
++AC_ARG_WITH([lastlog2],
++  AS_HELP_STRING([--without-lastlog2], [do not use liblastlog2]),
++  [], [with_lastlog2=check]
++)
++
++have_lastlog2=no
++AS_IF([test "x$with_lastlog2" != xno], [
++  PKG_CHECK_MODULES([LASTLOG2], [liblastlog2], [have_lastlog2=yes], [have_lastlog2=no])
++    AS_CASE([$with_lastlog2:$have_lastlog2],
++    [yes:no],
++      [AC_MSG_ERROR([liblastlog2 expected but liblastlog2 not found])],
++    [*:yes],
++       AC_DEFINE([HAVE_LASTLOG2], [1], [Define if liblastlog2 is available])
++  )
++])
++AM_CONDITIONAL([HAVE_LASTLOG2], [test "x$have_lastlog2" = xyes])
+ 
+ AC_ARG_ENABLE([bash-completion],
+   AS_HELP_STRING([--disable-bash-completion], [do not install bash completion files]),
+diff --git a/login-utils/Makemodule.am b/login-utils/Makemodule.am
+index 1c5a11d846..5168ae96b5 100644
+--- a/login-utils/Makemodule.am
++++ b/login-utils/Makemodule.am
+@@ -249,6 +249,10 @@ endif
+ if HAVE_ECONF
+ lslogins_LDADD += -leconf
+ endif
++if HAVE_LASTLOG2
++lslogins_LDADD += $(LASTLOG2_LIBS)
++lslogins_CFLAGS += $(LASTLOG2_CFLAGS)
++endif
+ endif # BUILD_LSLOGINS
+ 
+ 
+diff --git a/login-utils/lslogins.c b/login-utils/lslogins.c
+index 76d28125c9..b9bf579001 100644
+--- a/login-utils/lslogins.c
++++ b/login-utils/lslogins.c
+@@ -47,6 +47,10 @@
+ # include <systemd/sd-journal.h>
+ #endif
+ 
++#ifdef HAVE_LASTLOG2
++# include <lastlog2.h>
++#endif
++
+ #include "c.h"
+ #include "nls.h"
+ #include "closestream.h"
+@@ -262,6 +266,10 @@ struct lslogins_control {
+ 
+ 	int lastlogin_fd;
+ 
++#ifdef HAVE_LASTLOG2
++	const char *lastlog2_path;
++#endif
++
+ 	void *usertree;
+ 
+ 	uid_t uid;
+@@ -524,10 +532,63 @@ static int parse_utmpx(const char *path, size_t *nrecords, struct utmpx **record
+ 	return -EINVAL;
+ }
+ 
+-static void get_lastlog(struct lslogins_control *ctl, uid_t uid, void *dst, int what)
++#ifdef HAVE_LASTLOG2
++static int get_lastlog2(struct lslogins_control *ctl, const char *user, void *dst, int what)
++{
++	switch (what) {
++	case LASTLOG_TIME: {
++		time_t *t = dst;
++		int64_t res_time = 0;
++
++		if (ll2_read_entry(ctl->lastlog2_path, user, &res_time, NULL, NULL, NULL, NULL) != 0)
++			return -1;
++		*t = res_time;
++		break;
++		}
++	case LASTLOG_LINE: {
++		char *res_tty = NULL;
++
++		if (ll2_read_entry(ctl->lastlog2_path, user, NULL, &res_tty, NULL, NULL, NULL) != 0)
++			return -1;
++		if (res_tty) {
++			mem2strcpy(dst, res_tty, strlen(res_tty), strlen(res_tty) + 1);
++			free (res_tty);
++		}
++		break;
++		}
++	case LASTLOG_HOST: {
++		char *res_host = NULL;
++
++		if (ll2_read_entry(ctl->lastlog2_path, user, NULL, NULL, &res_host, NULL, NULL) != 0)
++			return -1;
++		if (res_host) {
++			mem2strcpy(dst, res_host, strlen(res_host), strlen(res_host) + 1);
++			free (res_host);
++		}
++		break;
++		}
++	default:
++		abort();
++	}
++	return 0;
++}
++#endif
++
++static void get_lastlog(struct lslogins_control *ctl, uid_t uid,
++#ifdef HAVE_LASTLOG2
++			const char *user,
++#else
++			const char *user __attribute__((__unused__)),
++#endif
++			void *dst, int what)
+ {
+ 	struct lastlog ll;
+ 
++#ifdef HAVE_LASTLOG2
++	if (get_lastlog2(ctl, user, dst, LASTLOG_TIME) >= 0)
++		return;
++#endif
++
+ 	if (ctl->lastlogin_fd < 0 ||
+ 	    pread(ctl->lastlogin_fd, (void *)&ll, sizeof(ll), uid * sizeof(ll)) != sizeof(ll))
+ 		return;
+@@ -797,7 +858,7 @@ static struct lslogins_user *get_user_info(struct lslogins_control *ctl, const c
+ 				user->last_login = make_time(ctl->time_mode, time);
+ 			} else {
+ 				time = 0;
+-				get_lastlog(ctl, pwd->pw_uid, &time, LASTLOG_TIME);
++				get_lastlog(ctl, pwd->pw_uid, pwd->pw_name, &time, LASTLOG_TIME);
+ 				if (time)
+ 					user->last_login = make_time(ctl->time_mode, time);
+ 			}
+@@ -809,7 +870,7 @@ static struct lslogins_user *get_user_info(struct lslogins_control *ctl, const c
+ 						sizeof(user_wtmp->ut_line),
+ 						sizeof(user_wtmp->ut_line) + 1);;
+ 			}  else
+-				get_lastlog(ctl, user->uid, user->last_tty, LASTLOG_LINE);
++			        get_lastlog(ctl, user->uid, user->login, user->last_tty, LASTLOG_LINE);
+ 			break;
+ 		case COL_LAST_HOSTNAME:
+ 			user->last_hostname = xcalloc(1, sizeof(user_wtmp->ut_host) + 1);
+@@ -818,7 +879,7 @@ static struct lslogins_user *get_user_info(struct lslogins_control *ctl, const c
+ 						sizeof(user_wtmp->ut_host),
+ 						sizeof(user_wtmp->ut_host) + 1);;
+ 			}  else
+-				get_lastlog(ctl, user->uid, user->last_hostname, LASTLOG_HOST);
++			        get_lastlog(ctl, user->uid, user->login, user->last_hostname, LASTLOG_HOST);
+ 			break;
+ 		case COL_FAILED_LOGIN:
+ 			if (user_btmp) {
+@@ -1469,6 +1530,9 @@ static void __attribute__((__noreturn__)) usage(void)
+ 	fputs(_("     --wtmp-file <path>   set an alternate path for wtmp\n"), out);
+ 	fputs(_("     --btmp-file <path>   set an alternate path for btmp\n"), out);
+ 	fputs(_("     --lastlog <path>     set an alternate path for lastlog\n"), out);
++#ifdef HAVE_LASTLOG2
++	fputs(_("     --lastlog2 <path>    set an alternate path for lastlog2\n"), out);
++#endif
+ 	fputs(USAGE_SEPARATOR, out);
+ 	printf(USAGE_HELP_OPTIONS(26));
+ 
+@@ -1494,6 +1558,9 @@ int main(int argc, char *argv[])
+ 		OPT_WTMP = CHAR_MAX + 1,
+ 		OPT_BTMP,
+ 		OPT_LASTLOG,
++#ifdef HAVE_LASTLOG2
++		OPT_LASTLOG2,
++#endif
+ 		OPT_NOTRUNC,
+ 		OPT_NOHEAD,
+ 		OPT_TIME_FMT,
+@@ -1526,6 +1593,9 @@ int main(int argc, char *argv[])
+ 		{ "wtmp-file",      required_argument,	0, OPT_WTMP },
+ 		{ "btmp-file",      required_argument,	0, OPT_BTMP },
+ 		{ "lastlog-file",   required_argument,	0, OPT_LASTLOG },
++#ifdef HAVE_LASTLOG2
++		{ "lastlog2-file",  required_argument,	0, OPT_LASTLOG2 },
++#endif
+ #ifdef HAVE_LIBSELINUX
+ 		{ "context",        no_argument,	0, 'Z' },
+ #endif
+@@ -1639,6 +1709,11 @@ int main(int argc, char *argv[])
+ 		case OPT_LASTLOG:
+ 			path_lastlog = optarg;
+ 			break;
++#ifdef HAVE_LASTLOG2
++		case OPT_LASTLOG2:
++		ctl->lastlog2_path = optarg;
++			break;
++#endif
+ 		case OPT_WTMP:
+ 			path_wtmp = optarg;
+ 			break;
+@@ -1711,6 +1786,10 @@ int main(int argc, char *argv[])
+ 	if (require_wtmp()) {
+ 		parse_utmpx(path_wtmp, &ctl->wtmp_size, &ctl->wtmp);
+ 		ctl->lastlogin_fd = open(path_lastlog, O_RDONLY, 0);
++#ifdef HAVE_LASTLOG2
++		if (!ctl->lastlog2_path)
++			ctl->lastlog2_path = _PATH_LASTLOG2;
++#endif
+ 	}
+ 	if (require_btmp())
+ 		parse_utmpx(path_btmp, &ctl->btmp_size, &ctl->btmp);
+diff --git a/meson.build b/meson.build
+index f0ebe07414..c347cac202 100644
+--- a/meson.build
++++ b/meson.build
+@@ -386,6 +386,11 @@ lib_audit = dependency(
+   required : get_option('audit'))
+ conf.set('HAVE_LIBAUDIT', lib_audit.found() ? 1 : false)
+ 
++lib_lastlog2 = dependency(
++  'liblastlog2',
++  required : get_option('lastlog2'))
++conf.set('HAVE_LASTLOG2', lib_lastlog2.found() ? 1 : false)
++
+ conf.set('HAVE_SMACK', not get_option('smack').disabled())
+ 
+ foreach header : headers
+@@ -1008,7 +1013,8 @@ exe = executable(
+   link_with : [lib_common,
+                lib_smartcols,
+                logindefs_c],
+-  dependencies : [lib_selinux,
++  dependencies : [lib_lastlog2,
++                  lib_selinux,
+                   lib_systemd],
+   install_dir : usrbin_exec_dir,
+   install : opt,
+diff --git a/meson_options.txt b/meson_options.txt
+index f546c3ce99..dfa8024cda 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -25,6 +25,7 @@ option('sysvinit',    type : 'feature', value : 'disabled',
+ option('btrfs',       type : 'feature')
+ option('widechar',    type : 'feature',
+        description : 'compile with wide character support')
++option('lastlog2',    type : 'feature')
+ 
+ # enable building of various programs and features ("build-" prefix)
+ 

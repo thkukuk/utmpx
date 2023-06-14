@@ -1,13 +1,13 @@
-From ccb18792439afaf4caf8144f23e98b72d808852b Mon Sep 17 00:00:00 2001
+From 806d136fe432b04ee9cabf78edf1928ca56f20c3 Mon Sep 17 00:00:00 2001
 From: Thorsten Kukuk <kukuk@suse.com>
 Date: Tue, 13 Jun 2023 17:43:13 +0200
-Subject: [PATCH 1/1] uptime: prefer logind over utmp
+Subject: [PATCH 3/4] uptime: prefer logind over utmp
 
 * src/uptime.c: prefer logind over utmp
 ---
  src/local.mk |  2 +-
- src/uptime.c | 19 +++++++++++++++++++
- 2 files changed, 20 insertions(+), 1 deletion(-)
+ src/uptime.c | 21 ++++++++++++++++++++-
+ 2 files changed, 21 insertions(+), 2 deletions(-)
 
 diff --git a/src/local.mk b/src/local.mk
 index e3f3f7ef0..b30e57644 100644
@@ -23,7 +23,7 @@ index e3f3f7ef0..b30e57644 100644
  # See vdir_LDADD below
  src_wc_LDADD = $(LDADD)
 diff --git a/src/uptime.c b/src/uptime.c
-index 061b85c16..5c1a3a3a8 100644
+index 061b85c16..21bb340cc 100644
 --- a/src/uptime.c
 +++ b/src/uptime.c
 @@ -22,6 +22,11 @@
@@ -61,13 +61,22 @@ index 061b85c16..5c1a3a3a8 100644
  
    time_now = time (NULL);
  #if defined HAVE_PROC_UPTIME
+@@ -180,7 +194,7 @@ uptime (char const *filename, int options)
+   STRUCT_UTMP *utmp_buf = NULL;
+ 
+ #if HAVE_STRUCT_UTMP_UT_TYPE || HAVE_STRUCT_UTMPX_UT_TYPE
+-  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
++  if (filename && read_utmp (filename, &n_users, &utmp_buf, options) != 0)
+     die (EXIT_FAILURE, errno, "%s", quotef (filename));
+ #endif
+ 
 @@ -241,6 +255,11 @@ main (int argc, char **argv)
    switch (argc - optind)
      {
      case 0:			/* uptime */
 +#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +      if (sd_booted() > 0)
-+	print_uptime (0, NULL);
++	uptime (NULL, 0);
 +      else
 +#endif
        uptime (UTMP_FILE, READ_UTMP_CHECK_PIDS);

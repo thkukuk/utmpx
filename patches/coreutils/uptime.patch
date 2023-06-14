@@ -1,0 +1,78 @@
+From ccb18792439afaf4caf8144f23e98b72d808852b Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Tue, 13 Jun 2023 17:43:13 +0200
+Subject: [PATCH 1/1] uptime: prefer logind over utmp
+
+* src/uptime.c: prefer logind over utmp
+---
+ src/local.mk |  2 +-
+ src/uptime.c | 19 +++++++++++++++++++
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/src/local.mk b/src/local.mk
+index e3f3f7ef0..b30e57644 100644
+--- a/src/local.mk
++++ b/src/local.mk
+@@ -206,7 +206,7 @@ src_uname_LDADD = $(LDADD)
+ src_unexpand_LDADD = $(LDADD)
+ src_uniq_LDADD = $(LDADD)
+ src_unlink_LDADD = $(LDADD)
+-src_uptime_LDADD = $(LDADD)
++src_uptime_LDADD = $(LDADD) -lsystemd
+ src_users_LDADD = $(LDADD) -lsystemd
+ # See vdir_LDADD below
+ src_wc_LDADD = $(LDADD)
+diff --git a/src/uptime.c b/src/uptime.c
+index 061b85c16..5c1a3a3a8 100644
+--- a/src/uptime.c
++++ b/src/uptime.c
+@@ -22,6 +22,11 @@
+ #include <sys/types.h>
+ #include "system.h"
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++#include <systemd/sd-daemon.h>
++#include <systemd/sd-login.h>
++#endif
++
+ #if HAVE_SYSCTL && HAVE_SYS_SYSCTL_H && ! defined __GLIBC__
+ # include <sys/sysctl.h>
+ #endif
+@@ -102,6 +107,12 @@ print_uptime (size_t n, const STRUCT_UTMP *this)
+   }
+ #endif
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (this == NULL)
++    entries = sd_get_sessions (NULL);
++  else
++    {
++#endif
+ #if HAVE_STRUCT_UTMP_UT_TYPE || HAVE_STRUCT_UTMPX_UT_TYPE
+   /* Loop through all the utmp entries we just read and count up the valid
+      ones, also in the process possibly gleaning boottime. */
+@@ -116,6 +127,9 @@ print_uptime (size_t n, const STRUCT_UTMP *this)
+   (void) n;
+   (void) this;
+ #endif
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++    }
++#endif
+ 
+   time_now = time (NULL);
+ #if defined HAVE_PROC_UPTIME
+@@ -241,6 +255,11 @@ main (int argc, char **argv)
+   switch (argc - optind)
+     {
+     case 0:			/* uptime */
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++      if (sd_booted() > 0)
++	print_uptime (0, NULL);
++      else
++#endif
+       uptime (UTMP_FILE, READ_UTMP_CHECK_PIDS);
+       break;
+ 
+-- 
+2.41.0
+

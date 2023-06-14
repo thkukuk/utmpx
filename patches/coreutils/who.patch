@@ -1,0 +1,391 @@
+From 2eb8437e933a3051d4db4e641ac093a737c6b849 Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Wed, 14 Jun 2023 11:30:33 +0200
+Subject: [PATCH 1/1] who: prefer logind over utmp
+
+* src/who.c: perfer logind over utmp
+---
+ src/local.mk |   2 +-
+ src/who.c    | 235 ++++++++++++++++++++++++++++++++++++++++++++++++---
+ 2 files changed, 224 insertions(+), 13 deletions(-)
+
+diff --git a/src/local.mk b/src/local.mk
+index b30e57644..6cc5ac302 100644
+--- a/src/local.mk
++++ b/src/local.mk
+@@ -210,7 +210,7 @@ src_uptime_LDADD = $(LDADD) -lsystemd
+ src_users_LDADD = $(LDADD) -lsystemd
+ # See vdir_LDADD below
+ src_wc_LDADD = $(LDADD)
+-src_who_LDADD = $(LDADD)
++src_who_LDADD = $(LDADD) -lsystemd
+ src_whoami_LDADD = $(LDADD)
+ src_yes_LDADD = $(LDADD)
+ 
+diff --git a/src/who.c b/src/who.c
+index 06e1ab0f6..a9a9c7d51 100644
+--- a/src/who.c
++++ b/src/who.c
+@@ -43,6 +43,11 @@
+ # include <grp.h>
+ #endif
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++#include <systemd/sd-daemon.h>
++#include <systemd/sd-login.h>
++#endif
++
+ /* The official name of this program (e.g., no 'g' prefix).  */
+ #define PROGRAM_NAME "who"
+ 
+@@ -215,7 +220,7 @@ idle_string (time_t when, time_t boottime)
+ 
+ /* Return a time string.  */
+ static char const *
+-time_string (const STRUCT_UTMP *utmp_ent)
++time_string (const time_t t_arg)
+ {
+   static char buf[INT_STRLEN_BOUND (intmax_t) + sizeof "-%m-%d %H:%M"];
+ 
+@@ -225,7 +230,7 @@ time_string (const STRUCT_UTMP *utmp_ent)
+      utmp file formats which do not use a simple time_t ut_time field.
+      In glibc, ut_time is a macro which selects for backward compatibility
+      the tv_sec member of a struct timeval value."  */
+-  time_t t = UT_TIME_MEMBER (utmp_ent);
++  time_t t = t_arg;
+   struct tm *tmp = localtime (&t);
+ 
+   if (tmp)
+@@ -433,15 +438,125 @@ print_user (const STRUCT_UTMP *utmp_ent, time_t boottime)
+ 
+   print_line (sizeof UT_USER (utmp_ent), UT_USER (utmp_ent), mesg,
+               sizeof utmp_ent->ut_line, utmp_ent->ut_line,
+-              time_string (utmp_ent), idlestr, pidstr,
++              time_string (UT_TIME_MEMBER (utmp_ent)), idlestr, pidstr,
++              hoststr ? hoststr : "", "");
++}
++
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++/* Send properly parsed USER_PROCESS info to print_line.  The most
++   recent boot time is BOOTTIME. */
++static void
++print_user_logind (const char *session, time_t boottime)
++{
++  struct stat stats;
++  time_t last_change;
++  char mesg;
++  char idlestr[IDLESTR_LEN + 1];
++  static char *hoststr;
++  static size_t hostlen;
++  char *ut_line;
++  char *p, *line;
++  pid_t ut_pid;
++
++  sd_session_get_leader(session, &ut_pid);
++
++  char pidstr[INT_STRLEN_BOUND (ut_pid) + 1];	\
++  sprintf (pidstr, "%ld", (long int) (ut_pid));
++
++#define DEV_DIR_WITH_TRAILING_SLASH "/dev/"
++#define DEV_DIR_LEN (sizeof (DEV_DIR_WITH_TRAILING_SLASH) - 1)
++
++  if (sd_session_get_tty (session, &ut_line) < 0)
++   ut_line = strdup ("");
++
++  line = xmalloc (strlen(ut_line) + DEV_DIR_LEN + 1);
++  p = line;
++  /* Copy ut_line into LINE, prepending '/dev/' if ut_line is not
++     already an absolute file name.  Some systems may put the full,
++     absolute file name in ut_line.  */
++  if ( ! IS_ABSOLUTE_FILE_NAME (ut_line))
++    p = stpcpy (p, DEV_DIR_WITH_TRAILING_SLASH);
++  stpcpy (p, ut_line);
++
++  if (stat (line, &stats) == 0)
++    {
++      mesg = is_tty_writable (&stats) ? '+' : '-';
++      last_change = stats.st_atime;
++    }
++  else
++    {
++      mesg = '?';
++      last_change = 0;
++    }
++  free (line);
++
++  if (last_change)
++    sprintf (idlestr, "%.*s", IDLESTR_LEN, idle_string (last_change, boottime));
++  else
++    sprintf (idlestr, "  ?");
++
++  char *ut_host = NULL;
++  char *host = NULL;
++
++  if (sd_session_get_remote_host (session, &ut_host) >= 0)
++    {
++      if (*ut_host && do_lookup)
++	{
++	  /* See if we can canonicalize it.  */
++	  host = canon_host (ut_host);
++	}
++
++      if (! host)
++	host = ut_host;
++
++      if (hostlen < strlen (host) + 3)
++	{
++	  hostlen = strlen (host) + 3;
++	  free (hoststr);
++	  hoststr = xmalloc (hostlen);
++	}
++      sprintf (hoststr, "(%s)", host);
++
++      if (host != ut_host)
++	free (host);
++      free (ut_host);
++    }
++  else
++    {
++      if (hostlen < 1)
++        {
++          hostlen = 1;
++          free (hoststr);
++          hoststr = xmalloc (hostlen);
++        }
++      *hoststr = '\0';
++    }
++
++  char *name;
++  uint64_t usec = 0;
++  uid_t uid;
++  int r;
++
++  if ((r = sd_session_get_username (session, &name)) < 0)
++    die (EXIT_FAILURE, -r, _("couldn't get user name"));
++  if ((r = sd_session_get_uid (session, &uid)) < 0)
++    die (EXIT_FAILURE, -r, _("couldn't get user ID"));
++  if ((r = sd_uid_get_login_time(uid, &usec)) < 0)
++    die (EXIT_FAILURE, -r, _("couldn't get login time"));
++
++  print_line (-1, name, mesg,
++              -1, ut_line,
++              time_string (usec/(uint64_t) 1000000ULL), idlestr, pidstr,
+               hoststr ? hoststr : "", "");
++  free (ut_line);
+ }
++#endif
+ 
+ static void
+-print_boottime (const STRUCT_UTMP *utmp_ent)
++print_boottime (const time_t t)
+ {
+   print_line (-1, "", ' ', -1, _("system boot"),
+-              time_string (utmp_ent), "", "", "", "");
++              time_string (t), "", "", "", "");
+ }
+ 
+ static char *
+@@ -474,7 +589,8 @@ print_deadprocs (const STRUCT_UTMP *utmp_ent)
+   /* FIXME: add idle time? */
+ 
+   print_line (-1, "", ' ', sizeof utmp_ent->ut_line, utmp_ent->ut_line,
+-              time_string (utmp_ent), "", pidstr, comment, exitstr);
++              time_string (UT_TIME_MEMBER (utmp_ent)), "", pidstr, comment,
++	      exitstr);
+   free (comment);
+ }
+ 
+@@ -487,7 +603,7 @@ print_login (const STRUCT_UTMP *utmp_ent)
+   /* FIXME: add idle time? */
+ 
+   print_line (-1, _("LOGIN"), ' ', sizeof utmp_ent->ut_line, utmp_ent->ut_line,
+-              time_string (utmp_ent), "", pidstr, comment, "");
++              time_string (UT_TIME_MEMBER (utmp_ent)), "", pidstr, comment, "");
+   free (comment);
+ }
+ 
+@@ -498,7 +614,7 @@ print_initspawn (const STRUCT_UTMP *utmp_ent)
+   PIDSTR_DECL_AND_INIT (pidstr, utmp_ent);
+ 
+   print_line (-1, "", ' ', sizeof utmp_ent->ut_line, utmp_ent->ut_line,
+-              time_string (utmp_ent), "", pidstr, comment, "");
++              time_string (UT_TIME_MEMBER (utmp_ent)), "", pidstr, comment, "");
+   free (comment);
+ }
+ 
+@@ -507,7 +623,7 @@ print_clockchange (const STRUCT_UTMP *utmp_ent)
+ {
+   /* FIXME: handle NEW_TIME & OLD_TIME both */
+   print_line (-1, "", ' ', -1, _("clock change"),
+-              time_string (utmp_ent), "", "", "", "");
++              time_string (UT_TIME_MEMBER (utmp_ent)), "", "", "", "");
+ }
+ 
+ static void
+@@ -525,7 +641,8 @@ print_runlevel (const STRUCT_UTMP *utmp_ent)
+     comment = xmalloc (strlen (_("last=")) + 2);
+   sprintf (comment, "%s%c", _("last="), (last == 'N') ? 'S' : last);
+ 
+-  print_line (-1, "", ' ', -1, runlevline, time_string (utmp_ent),
++  print_line (-1, "", ' ', -1, runlevline,
++	      time_string (UT_TIME_MEMBER (utmp_ent)),
+               "", "", c_isprint (last) ? comment : "", "");
+ 
+   return;
+@@ -539,6 +656,10 @@ list_entries_who (size_t n, const STRUCT_UTMP *utmp_buf)
+   unsigned long int entries = 0;
+   char const *separator = "";
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (utmp_buf)
++    {
++#endif
+   while (n--)
+     {
+       if (IS_USER_PROCESS (utmp_buf))
+@@ -554,6 +675,31 @@ list_entries_who (size_t n, const STRUCT_UTMP *utmp_buf)
+         }
+       utmp_buf++;
+     }
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++    }
++  else
++    {
++      char **sessions_list;
++      int i;
++
++      entries = sd_get_sessions (&sessions_list);
++
++      for (i = 0;  i < entries; i++)
++	{
++	  char *name;
++	  int r;
++
++	  if ((r = sd_session_get_username (sessions_list[i], &name)) < 0)
++	    die (EXIT_FAILURE, -r, _("couldn't get user name"));
++
++	  printf ("%s%s", separator, name);
++	  free (name);
++	  separator = " ";
++	  free (sessions_list[i]);
++	}
++      free (sessions_list);
++    }
++#endif
+   printf (_("\n# users=%lu\n"), entries);
+ }
+ 
+@@ -583,6 +729,10 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
+         ttyname_b += DEV_DIR_LEN;	/* Discard /dev/ prefix.  */
+     }
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (utmp_buf)
++    {
++#endif
+   while (n--)
+     {
+       if (!my_line_only
+@@ -594,7 +744,7 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
+           else if (need_runlevel && UT_TYPE_RUN_LVL (utmp_buf))
+             print_runlevel (utmp_buf);
+           else if (need_boottime && UT_TYPE_BOOT_TIME (utmp_buf))
+-            print_boottime (utmp_buf);
++            print_boottime (UT_TIME_MEMBER (utmp_buf));
+           /* I've never seen one of these, so I don't know what it should
+              look like :^)
+              FIXME: handle OLD_TIME also, perhaps show the delta? */
+@@ -613,6 +763,48 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
+ 
+       utmp_buf++;
+     }
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++    }
++  else
++    {
++      char **sessions_list;
++      int n_sessions = sd_get_sessions (&sessions_list);
++      struct timespec ts_now;
++      struct timespec ts_boot;
++      clock_gettime (CLOCK_REALTIME, &ts_now);
++      clock_gettime (CLOCK_BOOTTIME, &ts_boot);
++
++      struct timespec diff = {.tv_sec = ts_now.tv_sec - ts_boot.tv_sec,
++			      .tv_nsec = ts_now.tv_nsec - ts_boot.tv_nsec};
++      if (diff.tv_nsec < 0) {
++	diff.tv_nsec += 1000000000; // nsec/sec
++	diff.tv_sec--;
++      }
++      boottime = diff.tv_sec;
++
++      for (int i = 0;  i < n_sessions; i++)
++	{
++	  char *tty;
++
++	  if (sd_session_get_tty (sessions_list[i], &tty) < 0)
++	    tty = strdup ("");
++
++	  if (!my_line_only
++	      || STREQ (ttyname_b, tty))
++	    {
++	      if (need_users)
++		print_user_logind (sessions_list[i], boottime);
++	    }
++
++	  free (tty);
++	  free (sessions_list[i]);
++	}
++      if (need_boottime)
++	print_boottime (boottime);
++
++      free (sessions_list);
++    }
++#endif
+ }
+ 
+ /* Display a list of who is on the system, according to utmp file FILENAME.
+@@ -620,6 +812,10 @@ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf)
+ static void
+ who (char const *filename, int options)
+ {
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (filename)
++    {
++#endif
+   size_t n_users;
+   STRUCT_UTMP *utmp_buf;
+ 
+@@ -632,6 +828,16 @@ who (char const *filename, int options)
+     scan_entries (n_users, utmp_buf);
+ 
+   free (utmp_buf);
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++    }
++  else
++    {
++      if (short_list)
++	list_entries_who (0, NULL);
++      else
++	scan_entries (0, NULL);
++    }
++#endif
+ }
+ 
+ void
+@@ -820,7 +1026,12 @@ main (int argc, char **argv)
+       FALLTHROUGH;
+     case -1:
+     case 0:			/* who */
+-      who (UTMP_FILE, READ_UTMP_CHECK_PIDS);
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++      if (sd_booted() > 0)
++	who (NULL, 0);
++      else
++#endif
++	who (UTMP_FILE, READ_UTMP_CHECK_PIDS);
+       break;
+ 
+     case 1:			/* who <utmp file> */
+-- 
+2.41.0
+

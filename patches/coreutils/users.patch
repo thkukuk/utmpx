@@ -1,19 +1,44 @@
+From 097a4451bbde33155154458c101e25750a681d5d Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Tue, 13 Jun 2023 15:32:54 +0200
+Subject: [PATCH 1/1] users: prefer logind over utmp
+
+* src/users.c: prefer logind over utmp
+---
+ src/local.mk |  2 +-
+ src/users.c  | 60 +++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 60 insertions(+), 2 deletions(-)
+
+diff --git a/src/local.mk b/src/local.mk
+index 13eeea8e0..cd8e99ff9 100644
+--- a/src/local.mk
++++ b/src/local.mk
+@@ -207,7 +207,7 @@ src_unexpand_LDADD = $(LDADD)
+ src_uniq_LDADD = $(LDADD)
+ src_unlink_LDADD = $(LDADD)
+ src_uptime_LDADD = $(LDADD)
+-src_users_LDADD = $(LDADD)
++src_users_LDADD = $(LDADD) -lsystemd
+ # See vdir_LDADD below
+ src_wc_LDADD = $(LDADD)
+ src_who_LDADD = $(LDADD)
 diff --git a/src/users.c b/src/users.c
-index 86bd1b1f4..047ee76b6 100644
+index 86bd1b1f4..a954b726a 100644
 --- a/src/users.c
 +++ b/src/users.c
-@@ -22,6 +22,10 @@
+@@ -22,6 +22,11 @@
  #include <sys/types.h>
  #include "system.h"
  
 +#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++#include <systemd/sd-daemon.h>
 +#include <systemd/sd-login.h>
 +#endif
 +
  #include "die.h"
  #include "error.h"
  #include "long-options.h"
-@@ -78,21 +82,67 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
+@@ -78,12 +83,57 @@ list_entries_users (size_t n, const STRUCT_UTMP *this)
    free (u);
  }
  
@@ -53,8 +78,6 @@ index 86bd1b1f4..047ee76b6 100644
  static void
  users (char const *filename, int options)
  {
--  size_t n_users;
--  STRUCT_UTMP *utmp_buf;
 +#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +  if (filename == NULL)
 +    {
@@ -64,38 +87,39 @@ index 86bd1b1f4..047ee76b6 100644
 +
 +      list_entries_users_logind (n_sessions, sessions_list);
 +      for (i = 0;  i < n_sessions; i++)
-+	free (sessions_list[i]);
++       free (sessions_list[i]);
 +      free (sessions_list);
 +    }
 +  else
-+#endif
 +    {
-+      size_t n_users;
-+      STRUCT_UTMP *utmp_buf;
++#endif
+   size_t n_users;
+   STRUCT_UTMP *utmp_buf;
  
--  if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
--    die (EXIT_FAILURE, errno, "%s", quotef (filename));
-+      if (read_utmp (filename, &n_users, &utmp_buf, options) != 0)
-+	die (EXIT_FAILURE, errno, "%s", quotef (filename));
+@@ -93,6 +143,9 @@ users (char const *filename, int options)
+   list_entries_users (n_users, utmp_buf);
  
--  list_entries_users (n_users, utmp_buf);
-+      list_entries_users (n_users, utmp_buf);
- 
--  free (utmp_buf);
-+      free (utmp_buf);
+   free (utmp_buf);
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
 +    }
++#endif
  }
  
  void
-@@ -134,7 +184,11 @@ main (int argc, char **argv)
+@@ -134,7 +187,12 @@ main (int argc, char **argv)
    switch (argc - optind)
      {
      case 0:			/* users */
+-      users (UTMP_FILE, READ_UTMP_CHECK_PIDS);
 +#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
-+      users (NULL, 0);
-+#else
-       users (UTMP_FILE, READ_UTMP_CHECK_PIDS);
++      if (sd_booted())
++	users (NULL, 0);
++      else
 +#endif
++	users (UTMP_FILE, READ_UTMP_CHECK_PIDS);
        break;
  
      case 1:			/* users <utmp file> */
+-- 
+2.41.0
+

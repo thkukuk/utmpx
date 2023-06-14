@@ -1,0 +1,292 @@
+From c49b4b180c2ee5fc1ebccd41336dbd7ecd1ed720 Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Tue, 13 Jun 2023 16:19:05 +0200
+Subject: [PATCH 1/1] pinky: prefer logind over utmp
+
+* src/pinky.c: prefer logind over utmp
+---
+ src/local.mk |   2 +-
+ src/pinky.c  | 202 +++++++++++++++++++++++++++++++++++++++++++++------
+ 2 files changed, 179 insertions(+), 25 deletions(-)
+
+diff --git a/src/local.mk b/src/local.mk
+index cd8e99ff9..e3f3f7ef0 100644
+--- a/src/local.mk
++++ b/src/local.mk
+@@ -164,7 +164,7 @@ src_numfmt_LDADD = $(LDADD)
+ src_od_LDADD = $(LDADD)
+ src_paste_LDADD = $(LDADD)
+ src_pathchk_LDADD = $(LDADD)
+-src_pinky_LDADD = $(LDADD)
++src_pinky_LDADD = $(LDADD) -lsystemd
+ src_pr_LDADD = $(LDADD)
+ src_printenv_LDADD = $(LDADD)
+ src_printf_LDADD = $(LDADD)
+diff --git a/src/pinky.c b/src/pinky.c
+index 79317dc34..763048ebf 100644
+--- a/src/pinky.c
++++ b/src/pinky.c
+@@ -24,6 +24,11 @@
+ #include <sys/types.h>
+ #include "system.h"
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++#include <systemd/sd-daemon.h>
++#include <systemd/sd-login.h>
++#endif
++
+ #include "canon-host.h"
+ #include "die.h"
+ #include "error.h"
+@@ -173,17 +178,10 @@ idle_string (time_t when)
+ 
+ /* Return a time string.  */
+ static char const *
+-time_string (const STRUCT_UTMP *utmp_ent)
++time_string (const time_t t)
+ {
+   static char buf[INT_STRLEN_BOUND (intmax_t) + sizeof "-%m-%d %H:%M"];
+ 
+-  /* Don't take the address of UT_TIME_MEMBER directly.
+-     Ulrich Drepper wrote:
+-     "... GNU libc (and perhaps other libcs as well) have extended
+-     utmp file formats which do not use a simple time_t ut_time field.
+-     In glibc, ut_time is a macro which selects for backward compatibility
+-     the tv_sec member of a struct timeval value."  */
+-  time_t t = UT_TIME_MEMBER (utmp_ent);
+   struct tm *tmp = localtime (&t);
+ 
+   if (tmp)
+@@ -266,7 +264,13 @@ print_entry (const STRUCT_UTMP *utmp_ent)
+         printf (" %-6s", _("?????"));
+     }
+ 
+-  printf (" %s", time_string (utmp_ent));
++    /* Don't take the address of UT_TIME_MEMBER directly.
++     Ulrich Drepper wrote:
++     "... GNU libc (and perhaps other libcs as well) have extended
++     utmp file formats which do not use a simple time_t ut_time field.
++     In glibc, ut_time is a macro which selects for backward compatibility
++     the tv_sec member of a struct timeval value."  */
++  printf (" %s", time_string (UT_TIME_MEMBER(utmp_ent)));
+ 
+ #ifdef HAVE_UT_HOST
+   if (include_where && utmp_ent->ut_host[0])
+@@ -302,6 +306,128 @@ print_entry (const STRUCT_UTMP *utmp_ent)
+   putchar ('\n');
+ }
+ 
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++/* Display a line of information about logind session. */
++
++static void
++print_session_entry (const char *session)
++{
++  struct stat stats;
++  time_t last_change;
++  char mesg;
++  char *tty;
++  char *name;
++  char *remote_host = NULL;
++  int r;
++
++#define DEV_DIR_WITH_TRAILING_SLASH "/dev/"
++#define DEV_DIR_LEN (sizeof (DEV_DIR_WITH_TRAILING_SLASH) - 1)
++
++  if (sd_session_get_tty (session, &tty) < 0)
++    tty = strdup ("???"); /* application did not set TTY */
++
++  if ((r = sd_session_get_username (session, &name)) < 0)
++    die (EXIT_FAILURE, -r , _("couldn't get username"));
++
++  /* XXX no fix size! */
++  char line[/* strlen(tty)*/ 50 + DEV_DIR_LEN + 1];
++  char *p = line;
++
++
++  /* Copy tty into LINE, prepending '/dev/' if tty is not
++     already an absolute file name. sytemd normally never
++     uses the absolute file name. */
++  if ( ! IS_ABSOLUTE_FILE_NAME (tty))
++    p = stpcpy (p, DEV_DIR_WITH_TRAILING_SLASH);
++  stzncpy (p, tty, strlen(tty));
++
++  if (stat (line, &stats) == 0)
++    {
++      mesg = (stats.st_mode & S_IWGRP) ? ' ' : '*';
++      last_change = stats.st_atime;
++    }
++  else
++    {
++      mesg = '?';
++      last_change = 0;
++    }
++
++  printf ("%-8s", name);
++
++  if (include_fullname)
++    {
++      struct passwd *pw;
++
++      pw = getpwnam (name);
++      if (pw == NULL)
++        /* TRANSLATORS: Real name is unknown; at most 19 characters. */
++        printf (" %19s", _("        ???"));
++      else
++        {
++          char *const comma = strchr (pw->pw_gecos, ',');
++          char *result;
++
++          if (comma)
++            *comma = '\0';
++
++          result = create_fullname (pw->pw_gecos, pw->pw_name);
++          printf (" %-19.19s", result);
++          free (result);
++        }
++    }
++  free (name);
++
++  printf (" %c%-8s",
++          mesg, tty);
++  free (tty);
++
++  if (include_idle)
++    {
++      if (last_change)
++        printf (" %-6s", idle_string (last_change));
++      else
++        /* TRANSLATORS: Idle time is unknown; at most 5 characters. */
++        printf (" %-6s", _("?????"));
++    }
++
++  uint64_t time;
++  if ((r = sd_session_get_start_time (session, &time)) < 0)
++    die (EXIT_FAILURE, -r, _("Couldn't get start time of session"));
++
++  printf (" %s", time_string (time /(uint64_t) 1000000ULL));
++
++  sd_session_get_remote_host (session, &remote_host);
++  if (include_where && remote_host)
++    {
++      char *host = NULL;
++      char *display = NULL;
++
++      /* Look for an X display.  */
++      display = strchr (remote_host, ':');
++      if (display)
++        *display++ = '\0';
++
++      if (remote_host)
++        /* See if we can canonicalize it.  */
++        host = canon_host (remote_host);
++      if ( ! host)
++        host = remote_host;
++
++      if (display)
++        printf (" %s:%s", host, display);
++      else
++        printf (" %s", host);
++
++      if (host != remote_host)
++        free (host);
++
++      free (remote_host);
++    }
++
++  putchar ('\n');
++}
++#endif
++
+ /* Display a verbose line of information about UTMP_ENT. */
+ 
+ static void
+@@ -422,20 +548,6 @@ static void
+ scan_entries (size_t n, const STRUCT_UTMP *utmp_buf,
+               const int argc_names, char *const argv_names[])
+ {
+-  if (hard_locale (LC_TIME))
+-    {
+-      time_format = "%Y-%m-%d %H:%M";
+-      time_format_width = 4 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2;
+-    }
+-  else
+-    {
+-      time_format = "%b %e %H:%M";
+-      time_format_width = 3 + 1 + 2 + 1 + 2 + 1 + 2;
+-    }
+-
+-  if (include_heading)
+-    print_heading ();
+-
+   while (n--)
+     {
+       if (IS_USER_PROCESS (utmp_buf))
+@@ -462,6 +574,24 @@ static void
+ short_pinky (char const *filename,
+              const int argc_names, char *const argv_names[])
+ {
++  if (hard_locale (LC_TIME))
++    {
++      time_format = "%Y-%m-%d %H:%M";
++      time_format_width = 4 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2;
++    }
++  else
++    {
++      time_format = "%b %e %H:%M";
++      time_format_width = 3 + 1 + 2 + 1 + 2 + 1 + 2;
++    }
++
++  if (include_heading)
++    print_heading ();
++
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++  if (filename)
++    {
++#endif
+   size_t n_users;
+   STRUCT_UTMP *utmp_buf = NULL;
+ 
+@@ -469,6 +599,23 @@ short_pinky (char const *filename,
+     die (EXIT_FAILURE, errno, "%s", quotef (filename));
+ 
+   scan_entries (n_users, utmp_buf, argc_names, argv_names);
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++    }
++  else
++    {
++      char **sessions_list = NULL;
++      int sessions;
++
++      sessions = sd_get_sessions (&sessions_list);
++
++      for (int i = 0; i < sessions; i++)
++	{
++	  print_session_entry (sessions_list[i]);
++	  free (sessions_list[i]);
++	}
++      free (sessions_list);
++    }
++#endif
+   exit (EXIT_SUCCESS);
+ }
+ 
+@@ -594,7 +741,14 @@ main (int argc, char **argv)
+     }
+ 
+   if (do_short_format)
+-    short_pinky (UTMP_FILE, n_users, argv + optind);
++    {
++#if defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)
++      if (sd_booted() > 0)
++	short_pinky (NULL, n_users, argv + optind);
++      else
++#endif
++      short_pinky (UTMP_FILE, n_users, argv + optind);
++    }
+   else
+     long_pinky (n_users, argv + optind);
+ 
+-- 
+2.41.0
+

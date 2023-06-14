@@ -16,7 +16,7 @@ index 13eeea8e0..cd8e99ff9 100644
 @@ -207,7 +207,7 @@ src_unexpand_LDADD = $(LDADD)
  src_uniq_LDADD = $(LDADD)
  src_unlink_LDADD = $(LDADD)
- src_uptime_LDADD = $(LDADD)
+ src_uptime_LDADD = $(LDADD) -lsystemd
 -src_users_LDADD = $(LDADD)
 +src_users_LDADD = $(LDADD) -lsystemd
  # See vdir_LDADD below

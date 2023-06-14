@@ -19,7 +19,7 @@ index e3f3f7ef0..b30e57644 100644
  src_unlink_LDADD = $(LDADD)
 -src_uptime_LDADD = $(LDADD)
 +src_uptime_LDADD = $(LDADD) -lsystemd
- src_users_LDADD = $(LDADD) -lsystemd
+ src_users_LDADD = $(LDADD)
  # See vdir_LDADD below
  src_wc_LDADD = $(LDADD)
 diff --git a/src/uptime.c b/src/uptime.c

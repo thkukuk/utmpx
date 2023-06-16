@@ -1,13 +1,33 @@
+diff --git a/Makefile.in b/Makefile.in
+index f0ea07e7b..35dcf45f1 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -56,6 +56,7 @@ SSHDLIBS=@SSHDLIBS@
+ LIBEDIT=@LIBEDIT@
+ LIBFIDO2=@LIBFIDO2@
+ LIBWTMPDB=@LIBWTMPDB@
++LIBSYSTEMD=@LIBSYSTEMD@
+ AR=@AR@
+ AWK=@AWK@
+ RANLIB=@RANLIB@
+@@ -208,7 +209,7 @@ ssh$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHOBJS)
+ 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS) $(GSSLIBS) $(CHANNELLIBS)
+ 
+ sshd$(EXEEXT): libssh.a	$(LIBCOMPAT) $(SSHDOBJS)
+-	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS) $(CHANNELLIBS) $(LIBWTMPDB)
++	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS) $(CHANNELLIBS) $(LIBWTMPDB) $(LIBSYSTEMD)
+ 
+ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
+ 	$(LD) -o $@ $(SCP_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
 diff --git a/configure.ac b/configure.ac
-index a12c6f7ad..e71066298 100644
+index a12c6f7ad..860df3379 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -1789,6 +1789,49 @@ AC_ARG_WITH([wtmpdb],
+@@ -1789,6 +1789,47 @@ AC_ARG_WITH([wtmpdb],
  )
  
  
 +# Check whether user wants logind/set tty support
-+WTMPDB_MSG="no"
 +AC_ARG_WITH([logind],
 +	[  --with-logind[[=PATH]]   Enable logind support for sshd],
 +	[ if test "x$withval" != "xno" ; then
@@ -31,7 +51,7 @@ index a12c6f7ad..e71066298 100644
 +			fi
 +		fi
 +		if test "x$use_pkgconfig_for_libsystemd" = "xyes"; then
-+			LIBWTMPDB=`$PKGCONFIG --libs libsystemd`
++			LIBSYSTEMD=`$PKGCONFIG --libs libsystemd`
 +			CPPFLAGS="$CPPFLAGS `$PKGCONFIG --cflags libsystemd`"
 +		else
 +			LIBSYSTEMD="-lsystemd"
@@ -39,7 +59,6 @@ index a12c6f7ad..e71066298 100644
 +		OTHERLIBS=`echo $LIBSYSTEMD | sed 's/-lsystemd//'`
 +		AC_CHECK_LIB([systemd], [sd_bus_open_system],
 +			[ AC_DEFINE([USE_LOGIND], [1], [Use systemd-logind])
-+			  SYSTEMD_MSG="yes"
 +			  AC_SUBST([LIBSYSTEMD])
 +			],
 +			[ AC_MSG_ERROR([libsystemd not found]) ],
@@ -53,7 +72,7 @@ index a12c6f7ad..e71066298 100644
  AC_ARG_WITH([audit],
  	[  --with-audit=module     Enable audit support (modules=debug,bsm,linux)],
 diff --git a/loginrec.c b/loginrec.c
-index 86caf83b2..403895824 100644
+index 86caf83b2..8b413190b 100644
 --- a/loginrec.c
 +++ b/loginrec.c
 @@ -191,6 +191,10 @@
@@ -87,7 +106,7 @@ index 86caf83b2..403895824 100644
  #ifdef CUSTOM_SYS_AUTH_RECORD_LOGIN
  	if (li->type == LTYPE_LOGIN &&
  	    !sys_auth_record_login(li->username,li->hostname,li->line,
-@@ -1476,6 +1486,87 @@ wtmpdb_write_entry(struct logininfo *li)
+@@ -1476,6 +1486,88 @@ wtmpdb_write_entry(struct logininfo *li)
  }
  #endif
  
@@ -144,7 +163,8 @@ index 86caf83b2..403895824 100644
 +  if ((r = sd_bus_call_method(bus, DBUS_DESTINATION, dbus_path,
 +			      DBUS_INTERFACE, "SetTTY", &error, NULL,
 +			      "h", fd)) < 0) {
-+    logit("logind: cannot set TTY(%s, %s): %s", session_id, tty, strerror(-r));
++    if (r != -EBADR) /* logind does not support "SetTTY" */
++      logit("logind: cannot set TTY(%s, %s): %s", session_id, tty, strerror(-r));
 +    free(dbus_path);
 +    return (0);
 +  }
@@ -175,25 +195,3 @@ index 86caf83b2..403895824 100644
  
  /**
   ** Low-level libutil login() functions
-@@ -1615,10 +1706,10 @@ lastlog_write_entry(struct logininfo *li)
- 		strlcpy(last.ll_host, li->hostname,
- 		    MIN_SIZEOF(last.ll_host, li->hostname));
- 		last.ll_time = li->tv_sec;
--	
-+
- 		if (!lastlog_openseek(li, &fd, O_RDWR|O_CREAT))
- 			return (0);
--	
-+
- 		/* write the entry */
- 		if (atomicio(vwrite, fd, &last, sizeof(last)) != sizeof(last)) {
- 			close(fd);
-@@ -1626,7 +1717,7 @@ lastlog_write_entry(struct logininfo *li)
- 			    LASTLOG_FILE, strerror(errno));
- 			return (0);
- 		}
--	
-+
- 		close(fd);
- 		return (1);
- 	default:

@@ -43,12 +43,12 @@ An overview, which libsystemd function corresponds with which utmp entry
 | ut_pid  | sd_get_session_leader()[^1] ||
 | ut_line | sd_get_session_tty() ||
 | ut_id   | session_id |
-| ut_user ||
-| ut_host ||
-| ut_exit ||
-| ut_session ||
-| ut_tv ||
-| ut_addr_v6||
+| ut_user | sd_session_get_username()[^1] ||
+| ut_host | sd_session_get_remote_host () ||
+| ut_exit | - ||
+| ut_session | - ||
+| ut_tv | sd_session_get_start_time()[^1] ||
+| ut_addr_v6| - | See ut_host |
 
 [^1]: only available with systemd v254 or later
 

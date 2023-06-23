@@ -47,7 +47,7 @@ An overview, which libsystemd function corresponds with which utmp entry
 | ut_host | sd_session_get_remote_host () ||
 | ut_exit | - ||
 | ut_session | - ||
-| ut_tv | sd_session_get_start_time()[^1] ||
+| ut_tv | sd_session_get_start_time()[^1] |Start time of the session, this could be earlier than the login of the user. |
 | ut_addr_v6| - | See ut_host |
 
 [^1]: only available with systemd v254 or later
@@ -61,5 +61,11 @@ Since the boot time is not available from `logind`, we need to find another sour
   struct timespec ts_boot;
   clock_gettime (CLOCK_REALTIME, &ts_now);
   clock_gettime (CLOCK_BOOTTIME, &ts_boot);
-  time_t boottime = diff_timespec(&ts_now, &ts_boot);
+  struct timespec diff = {.tv_sec = ts_now.tv_sec - ts_boot.tv_sec,
+                         .tv_nsec = ts_now.tv_nsec - ts_boot.tv_nsec};
+  if (diff.tv_nsec < 0) {
+          diff.tv_nsec += 1000000000; // nsec/sec
+	  diff.tv_sec--;
+  }
+  time_t boottime = diff.tv_sec;
 ```

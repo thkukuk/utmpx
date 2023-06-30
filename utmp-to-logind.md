@@ -44,7 +44,7 @@ An overview, which libsystemd function corresponds with which utmp entry
 | ut_line | sd_get_session_tty() ||
 | ut_id   | session_id |
 | ut_user | sd_session_get_username()[^1] ||
-| ut_host | sd_session_get_remote_host () ||
+| ut_host | sd_session_get_remote_host() ||
 | ut_exit | - ||
 | ut_session | - ||
 | ut_tv | sd_session_get_start_time()[^1] |Start time of the session, this could be earlier than the login of the user. |

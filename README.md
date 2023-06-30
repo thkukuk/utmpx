@@ -4,6 +4,12 @@ Please read [Y2038](Y2038.md) for more information about why utmp/wtmp/btmp/last
 
 This repository contains the document with all background informations and patches for several packages.
 
+## Documentation
+
+* [Y2038 and utmp/wtmp/lastlog on bi-arch systems like x86-64](Y2038.md)
+* [Mapping of struct utmp to libsystemd functions](utmp-to-logind.md)
+
+## Patches
 Packages for which patches exist:
 * [coreutils](patches/coreutils/)
 * [monitoring-plugins](patches/monitoring-plugins/)

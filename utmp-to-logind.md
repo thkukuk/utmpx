@@ -54,7 +54,11 @@ An overview, which libsystemd function corresponds with which utmp entry
 
 ## Determine boot time
 
-Since the boot time is not available from `logind`, we need to find another source for this. On Linux, this is really simple:
+Since the boot time is not available from `logind`, we need to find another source for this. There is not the one solution.
+
+### Use CLOCK_BOOTTIME
+
+The result is very exact, as long as this is not running in a VM, which got saved and restored later:
 
 ```
   struct timespec ts_now;
@@ -69,3 +73,18 @@ Since the boot time is not available from `logind`, we need to find another sour
   }
   time_t boottime = diff.tv_sec;
 ```
+
+### Use time of file created during boot
+
+Use the time of a file created during the boot phase,
+e.g. `/var/lib/systemd/random-seed`.
+
+Problem is, that this file will be created a random time after the boot process started.
+
+### Use wtmpdb
+
+[wtmpdb](https://github.com/thkukuk/wtmpdb) stores the boot time calculated with help of CLOCK_BOOTTIME during the boot process. Since it is unlikely, that a VM will be saved to disk during the boot process already, it should be very exact and reliable.
+
+### Own service
+
+Create a service, which stores the timestamp of boot into a file like `/run/boottime`.

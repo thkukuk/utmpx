@@ -1,6 +1,6 @@
-diff -ur procps-ng-4.0.3.old/configure.ac procps-ng-4.0.3/configure.ac
---- procps-ng-4.0.3.old/configure.ac	2023-01-20 05:09:50.384554951 +0100
-+++ procps-ng-4.0.3/configure.ac	2023-06-23 14:51:37.339757432 +0200
+diff -ur procps-ng-4.0.3/configure.ac procps-ng-4.0.3-logind/configure.ac
+--- procps-ng-4.0.3/configure.ac	2023-01-20 05:09:50.384554951 +0100
++++ procps-ng-4.0.3-logind/configure.ac	2023-08-16 14:55:01.029867162 +0200
 @@ -270,6 +270,13 @@
      [PKG_CHECK_MODULES([SYSTEMD], [libsystemd-login])]
    )
@@ -15,9 +15,9 @@ diff -ur procps-ng-4.0.3.old/configure.ac procps-ng-4.0.3/configure.ac
  ])
  AM_CONDITIONAL([WITH_SYSTEMD], [test x$with_systemd != xno])
  
-diff -ur procps-ng-4.0.3.old/library/uptime.c procps-ng-4.0.3/library/uptime.c
---- procps-ng-4.0.3.old/library/uptime.c	2023-02-06 23:56:56.219274319 +0100
-+++ procps-ng-4.0.3/library/uptime.c	2023-06-23 14:46:47.742458466 +0200
+diff -ur procps-ng-4.0.3/library/uptime.c procps-ng-4.0.3-logind/library/uptime.c
+--- procps-ng-4.0.3/library/uptime.c	2023-02-06 23:56:56.219274319 +0100
++++ procps-ng-4.0.3-logind/library/uptime.c	2023-08-16 14:55:01.029867162 +0200
 @@ -31,6 +31,14 @@
  #include <time.h>
  #include <unistd.h>
@@ -66,9 +66,9 @@ diff -ur procps-ng-4.0.3.old/library/uptime.c procps-ng-4.0.3/library/uptime.c
      return shortbuf;
  }
 -
-diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
---- procps-ng-4.0.3.old/src/w.c	2023-02-13 21:24:25.924831319 +0100
-+++ procps-ng-4.0.3/src/w.c	2023-06-23 14:52:41.596045643 +0200
+diff -ur procps-ng-4.0.3/src/w.c procps-ng-4.0.3-logind/src/w.c
+--- procps-ng-4.0.3/src/w.c	2023-02-13 21:24:25.924831319 +0100
++++ procps-ng-4.0.3-logind/src/w.c	2023-08-16 15:08:23.434856409 +0200
 @@ -52,6 +52,14 @@
  #	include <utmp.h>
  #endif
@@ -171,7 +171,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
      }
  
      line = get_tty_device(tty);
-@@ -413,9 +455,15 @@
+@@ -413,9 +455,16 @@
                _("Unable to load process information"));
      total_procs = reap->counts->total;
  
@@ -181,6 +181,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
 +    else
 +        sd_session_get_leader(session, &ut_pid);
 +#endif
++
      for (i=0; i < total_procs; i++) {
          /* is this the login process? */
 -        if (PIDS_GETINT(TGID) == u->ut_pid) {
@@ -188,7 +189,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
              found_utpid = 1;
              if (!best_time) {
                  best_time = PIDS_GETULL(START);
-@@ -457,6 +505,9 @@
+@@ -457,6 +506,9 @@
  }
  
  static void showinfo(
@@ -198,7 +199,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
              utmp_t * u, int formtype, int maxcmd, int from,
              const int userlen, const int fromlen, const int ip_addresses,
              const int pids)
-@@ -472,14 +523,37 @@
+@@ -472,14 +524,37 @@
      strcpy(cmdline, "-");
  
      hertz = procps_hertz_get();
@@ -237,45 +238,47 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
      /*
       * just skip if stale utmp entry (i.e. login proc doesn't
       * exist). If there is a desire a cmdline flag could be
-@@ -488,19 +562,40 @@
+@@ -488,19 +563,45 @@
       */
          return;
  
+-    /* force NUL term for printf */
++
 +#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
 +    if (name)
-+      strncpy(uname, name, UT_NAMESIZE);
++        strncpy(uname, name, UT_NAMESIZE);
 +    else
 +#endif
-+      strncpy(uname, u->ut_user, UT_NAMESIZE);
-     /* force NUL term for printf */
--    strncpy(uname, u->ut_user, UT_NAMESIZE);
+     strncpy(uname, u->ut_user, UT_NAMESIZE);
++    /* force NUL term for printf */
 +    uname[UT_NAMESIZE] = '\0';
  
      if (formtype) {
--        printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, u->ut_line);
+         printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, u->ut_line);
 -        if (from)
 -            print_from(u, ip_addresses, fromlen);
-+        printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, tty + 5);
 +#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
 +        if (session) {
-+            uint64_t ltime;
++	    uint64_t ltime;
 +
 +            if (from)
-+              print_from(session, NULL, ip_addresses, fromlen);
++                print_from(session, NULL, ip_addresses, fromlen);
 +
-+            sd_session_get_start_time(session, &ltime);
++	    sd_session_get_start_time(session, &ltime);
 +            print_logintime(ltime/((uint64_t) 1000000ULL), stdout);
 +        } else {
 +#endif
 +            if (from)
-+                print_from(NULL, u, ip_addresses, fromlen);
++                print_from(
++#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
++                          NULL,
++#endif
++			  u, ip_addresses, fromlen);
 +
  #ifdef HAVE_UTMPX_H
--        print_logintime(u->ut_tv.tv_sec, stdout);
-+            print_logintime(u->ut_tv.tv_sec, stdout);
+         print_logintime(u->ut_tv.tv_sec, stdout);
  #else
--        print_logintime(u->ut_time, stdout);
-+            print_logintime(u->ut_time, stdout);
+         print_logintime(u->ut_time, stdout);
  #endif
 -        if (*u->ut_line == ':')
 +#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
@@ -285,17 +288,17 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
              /* idle unknown for xdm logins */
              printf(" ?xdm? ");
          else
-@@ -514,18 +609,24 @@
-         else
-             printf("   ?   ");
-     } else {
--        printf("%-*.*s%-9.8s", userlen + 1, userlen, u->ut_user,
--               u->ut_line);
-+        printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, tty + 5);
+@@ -517,15 +618,26 @@
+         printf("%-*.*s%-9.8s", userlen + 1, userlen, u->ut_user,
+                u->ut_line);
          if (from)
 -            print_from(u, ip_addresses, fromlen);
 -        if (*u->ut_line == ':')
-+	    print_from(NULL, u, ip_addresses, fromlen);
++	    print_from(
++#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
++		       NULL,
++#endif
++		       u, ip_addresses, fromlen);
 +        if (u && *u->ut_line == ':')
              /* idle unknown for xdm logins */
              printf(" ?xdm? ");
@@ -315,7 +318,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
          if (pids_length > maxcmd) {
              maxcmd = 0;
          } else if (pids_length > 0) {
-@@ -691,7 +792,40 @@
+@@ -691,7 +803,40 @@
  		else
  			printf(_("   IDLE WHAT\n"));
  	}
@@ -357,7 +360,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
  #ifdef HAVE_UTMPX_H
  	setutxent();
  #else
-@@ -710,7 +844,11 @@
+@@ -710,7 +855,11 @@
  			if (u->ut_type != USER_PROCESS)
  				continue;
  			if (!strncmp(u->ut_user, user, UT_NAMESIZE))
@@ -370,7 +373,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
  					 fromlen, ip_addresses, pids);
  		}
  	} else {
-@@ -725,7 +863,11 @@
+@@ -725,7 +874,11 @@
  			if (u->ut_type != USER_PROCESS)
  				continue;
  			if (*u->ut_user)
@@ -383,7 +386,7 @@ diff -ur procps-ng-4.0.3.old/src/w.c procps-ng-4.0.3/src/w.c
  					 fromlen, ip_addresses, pids);
  		}
  	}
-@@ -734,6 +876,9 @@
+@@ -734,6 +887,9 @@
  #else
  	endutent();
  #endif

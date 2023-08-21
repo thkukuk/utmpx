@@ -3,8 +3,7 @@
 This directory contains patches for `pinky`, `uptime`, `users` and `who` of coreutils to use `systemd-logind` instead of `utmp`. They will become obsolete after Gnulib has support for logind.
 
 Upstream:
-Upstream will create a Gnulib wrapper for utmp using logind:
-["who" reports funny dates](https://debbugs.gnu.org/cgi/bugreport.cgi?bug=64937)
+Upstream created a Gnulib wrapper for utmp using logind (["who" reports funny dates](https://debbugs.gnu.org/cgi/bugreport.cgi?bug=64937)) which will be part of coreutils 9.4
 
 List of patches:
 * pinky.patch

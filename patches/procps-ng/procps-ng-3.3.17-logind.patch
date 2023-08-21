@@ -1,6 +1,6 @@
-diff -ur procps-3.3.17.old/configure.ac procps-3.3.17/configure.ac
---- procps-3.3.17.old/configure.ac	2021-02-09 11:11:25.000000000 +0100
-+++ procps-3.3.17/configure.ac	2023-06-23 15:25:20.592956264 +0200
+diff -ur procps-3.3.17/configure.ac procps-3.3.17-logind/configure.ac
+--- procps-3.3.17/configure.ac	2021-02-09 11:11:25.000000000 +0100
++++ procps-3.3.17-logind/configure.ac	2023-08-16 15:32:58.367694467 +0200
 @@ -206,6 +206,13 @@
  AS_IF([test "x$with_systemd" != "xno"], [
    PKG_CHECK_MODULES([SYSTEMD], [libsystemd])
@@ -15,9 +15,9 @@ diff -ur procps-3.3.17.old/configure.ac procps-3.3.17/configure.ac
  ])
  AM_CONDITIONAL([WITH_SYSTEMD], [test x$with_systemd != xno])
  
-diff -ur procps-3.3.17.old/proc/whattime.c procps-3.3.17/proc/whattime.c
---- procps-3.3.17.old/proc/whattime.c	2021-02-09 11:11:25.000000000 +0100
-+++ procps-3.3.17/proc/whattime.c	2023-06-23 15:25:20.592956264 +0200
+diff -ur procps-3.3.17/proc/whattime.c procps-3.3.17-logind/proc/whattime.c
+--- procps-3.3.17/proc/whattime.c	2021-02-09 11:11:25.000000000 +0100
++++ procps-3.3.17-logind/proc/whattime.c	2023-08-16 15:32:58.367694467 +0200
 @@ -38,6 +38,15 @@
  #include "whattime.h"
  #include "sysinfo.h"
@@ -57,9 +57,9 @@ diff -ur procps-3.3.17.old/proc/whattime.c procps-3.3.17/proc/whattime.c
  
      pos += sprintf(buf + pos, "%2d user%s, ", numuser, numuser == 1 ? "" : "s");
  
-diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
---- procps-3.3.17.old/w.c	2021-02-09 11:11:25.000000000 +0100
-+++ procps-3.3.17/w.c	2023-06-23 15:26:22.409240225 +0200
+diff -ur procps-3.3.17/w.c procps-3.3.17-logind/w.c
+--- procps-3.3.17/w.c	2021-02-09 11:11:25.000000000 +0100
++++ procps-3.3.17-logind/w.c	2023-08-16 15:41:11.006848094 +0200
 @@ -56,11 +56,22 @@
  #include <time.h>
  #include <unistd.h>
@@ -239,7 +239,7 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
  
  	/*
  	 * just skip if stale utmp entry (i.e. login proc doesn't
-@@ -420,22 +492,43 @@
+@@ -420,22 +492,47 @@
  	if (!ut_pid_found)
  		return;
  
@@ -267,7 +267,11 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
 +        } else {
 +#endif
 +            if (from)
-+                print_from(NULL, u, ip_addresses, fromlen);
++	      print_from(
++#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
++			 NULL,
++#endif
++			 u, ip_addresses, fromlen);
  
 -	if (formtype) {
 -		printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, u->ut_line);
@@ -292,18 +296,22 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
  			print_time_ival7(idletime(tty), 0, stdout);
  		print_time_ival7(jcpu / Hertz, (jcpu % Hertz) * (100. / Hertz),
  				 stdout);
-@@ -450,8 +543,8 @@
+@@ -450,8 +547,12 @@
  		printf("%-*.*s%-9.8s", userlen + 1, userlen, u->ut_user,
  		       u->ut_line);
  		if (from)
 -			print_from(u, ip_addresses, fromlen);
 -		if (*u->ut_line == ':')
-+		        print_from(NULL, u, ip_addresses, fromlen);
++		  print_from(
++#if (defined(WITH_SYSTEMD) || defined(WITH_ELOGIND)) && defined(HAVE_SD_SESSION_GET_LEADER)
++			     NULL,
++#endif
++			     u, ip_addresses, fromlen);
 +		if (u && *u->ut_line == ':')
  			/* idle unknown for xdm logins */
  			printf(" ?xdm? ");
  		else
-@@ -622,7 +715,40 @@
+@@ -622,7 +723,40 @@
  		else
  			printf(_("   IDLE WHAT\n"));
  	}
@@ -345,7 +353,7 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
  #ifdef HAVE_UTMPX_H
  	setutxent();
  #else
-@@ -641,7 +767,11 @@
+@@ -641,7 +775,11 @@
  			if (u->ut_type != USER_PROCESS)
  				continue;
  			if (!strncmp(u->ut_user, user, UT_NAMESIZE))
@@ -358,7 +366,7 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
  					 fromlen, ip_addresses);
  		}
  	} else {
-@@ -656,7 +786,11 @@
+@@ -656,7 +794,11 @@
  			if (u->ut_type != USER_PROCESS)
  				continue;
  			if (*u->ut_user)
@@ -371,7 +379,7 @@ diff -ur procps-3.3.17.old/w.c procps-3.3.17/w.c
  					 fromlen, ip_addresses);
  		}
  	}
-@@ -665,6 +799,9 @@
+@@ -665,6 +807,9 @@
  #else
  	endutent();
  #endif

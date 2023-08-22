@@ -32,6 +32,31 @@ for (int i = 0; i < sessions; i++) {
 free (sessions_list);
 ```
 
+## Example: count users with logind and utmp as fallback
+
+In this example, we check at first if systemd-logind is running. If yes, we prefer this, else we will fallback to utmp.
+
+```
+int
+count_users(void)
+{
+  int numuser = 0;
+  struct utmp *ut;
+
+  if (sd_booted() > 0) {
+    numuser = sd_get_sessions(NULL);
+  } else {
+    setutent();
+    while ((ut = getutent())) {
+      if ((ut->ut_type == USER_PROCESS) && (ut->ut_name[0] != '\0'))
+        numuser++;
+    }
+    endutent();
+  }
+  return numuser;
+}
+```
+
 ## Mapping
 
 An overview, which libsystemd function corresponds with which utmp entry

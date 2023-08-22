@@ -37,6 +37,9 @@ free (sessions_list);
 In this example, we check at first if systemd-logind is running. If yes, we prefer this, else we will fallback to utmp.
 
 ```
+#include <systemd/sd-daemon.h>
+#include <systemd/sd-login.h>
+
 int
 count_users(void)
 {

@@ -68,8 +68,8 @@ An overview, which libsystemd function corresponds with which utmp entry
 | struct utmp | libsystemd | comment |
 |-------------|------------|---------|
 | ut_type | - | Only `USER_PROCESS` is available|
-| ut_pid  | sd_get_session_leader()[^1] ||
-| ut_line | sd_get_session_tty() ||
+| ut_pid  | sd_session_get_leader()[^1] ||
+| ut_line | sd_session_get_tty() ||
 | ut_id   | session_id |
 | ut_user | sd_session_get_username()[^1] ||
 | ut_host | sd_session_get_remote_host() ||

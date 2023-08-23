@@ -16,4 +16,5 @@ Packages for which patches exist:
 * [net-snmp](patches/net-snmp/)
 * [openssh](patches/openssh/)
 * [procps-ng (3.3.17/4.0.3)](patches/procps-ng/)
+* [samba](patches/samba/)
 * [util-linux](patches/util-linux/)

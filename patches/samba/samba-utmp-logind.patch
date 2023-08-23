@@ -1,0 +1,83 @@
+--- a/source3/rpc_server/wkssvc/srv_wkssvc_nt.c	2023-08-23 09:53:20.731440749 +0200
++++ b/source3/rpc_server/wkssvc/srv_wkssvc_nt.c	2023-08-23 12:01:20.787381127 +0200
+@@ -47,6 +47,11 @@
+ 
+ #ifdef HAVE_GETUTXENT
+ 
++#if defined(HAVE_LIBSYSTEMD)
++#include <systemd/sd-daemon.h>
++#include <systemd/sd-login.h>
++#endif
++
+ #include <utmpx.h>
+ 
+ struct usrinfo {
+@@ -71,6 +76,58 @@
+ 	char **users;
+ 	int i, num_users = 0;
+ 	struct usrinfo *usr_infos = NULL;
++
++#if defined(HAVE_LIBSYSTEMD)
++	if (sd_booted() > 0) {
++		char **sessions_list;
++		int sessions = sd_get_sessions(&sessions_list);
++
++		for (int j = 0; j < sessions; j++) {
++			struct usrinfo *tmp;
++			const char *session_id = sessions_list[j];
++			char *user;
++			uint64_t ltime;
++
++			sd_session_get_username(session_id, &user);
++
++			for (i = 0; i < num_users; i++) {
++				/* A user can be logged in multiple times,
++				   so ignore any dups */
++				int cmp = strncmp(user, usr_infos[i].name, sizeof(user));
++				if (cmp == 0) {
++					break;
++				}
++			}
++			if (i < num_users) {
++				free(sessions_list[j]);
++				continue;
++			}
++			tmp = talloc_realloc(mem_ctx, usr_infos, struct usrinfo,
++					     num_users+1);
++			if (tmp == NULL) {
++				TALLOC_FREE(tmp);
++				return ENOMEM;
++			}
++			usr_infos = tmp;
++			usr_infos[num_users].name = talloc_strdup(usr_infos,
++								  user);
++			free(user);
++			if (usr_infos[num_users].name == NULL) {
++				TALLOC_FREE(usr_infos);
++				return ENOMEM;
++			}
++
++			sd_session_get_start_time(session_id, &ltime);
++#define USEC_PER_SEC  ((uint64_t) 1000000ULL)
++			usr_infos[num_users].login_time.tv_sec = ltime/USEC_PER_SEC;
++			usr_infos[num_users].login_time.tv_usec = ltime % USEC_PER_SEC;
++			num_users += 1;
++
++			free(sessions_list[j]);
++		}
++		free(sessions_list);
++	} else {
++#endif
+ 	struct utmpx *u;
+ 
+ 	while ((u = getutxent()) != NULL) {
+@@ -109,6 +166,9 @@
+ 		usr_infos[num_users].login_time.tv_usec = u->ut_tv.tv_usec;
+ 		num_users += 1;
+ 	}
++#if defined(HAVE_LIBSYSTEMD)
++	}
++#endif
+ 
+ 	/* Sort the user list by time, oldest first */
+ 	TYPESAFE_QSORT(usr_infos, num_users, usr_info_cmp);

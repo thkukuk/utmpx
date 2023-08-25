@@ -17,5 +17,6 @@ Packages for which patches exist:
 * [openssh](patches/openssh/)
 * [procps-ng (3.3.17/4.0.3)](patches/procps-ng/)
 * [psutil](patches/psutil/)
+* [rsyslog](patches/rsyslog/)
 * [samba](patches/samba/)
 * [util-linux](patches/util-linux/)

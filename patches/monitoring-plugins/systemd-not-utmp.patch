@@ -1,6 +1,21 @@
---- monitoring-plugins-2.3.3.old/configure.ac	2023-02-01 14:40:55.000000000 +0100
-+++ monitoring-plugins-2.3.3/configure.ac	2023-06-15 16:21:19.637049416 +0200
-@@ -328,6 +328,25 @@
+From 801784ae89224d004dc79af95545acbdf547ce64 Mon Sep 17 00:00:00 2001
+From: Thorsten Kukuk <kukuk@suse.com>
+Date: Fri, 16 Jun 2023 09:28:21 +0200
+Subject: [PATCH] check_users: prefer systemd-logind over utmp
+
+Prefer systemd-logind over utmp to get the number of logged in users.
+utmp is not reliable for this (e.g. some terminals create utmp entries,
+other not) and utmp is not Y2038 safe with glibc on Linux.
+---
+ configure.ac              | 19 +++++++++++++++++++
+ plugins/Makefile.am       |  2 +-
+ plugins/check_users.c     | 37 +++++++++++++++++++++++++------------
+
+diff --git a/configure.ac b/configure.ac
+index 069cc625a..a294b00f4 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -328,6 +328,25 @@ AS_IF([test "x$with_ldap" != "xno"], [
    LIBS="$_SAVEDLIBS"
  ])
  
@@ -26,10 +41,69 @@
  dnl Check for headers used by check_ide_smart
  case $host in
    *linux*)
-diff -wur monitoring-plugins-2.3.3.old/plugins/check_users.c monitoring-plugins-2.3.3/plugins/check_users.c
---- monitoring-plugins-2.3.3.old/plugins/check_users.c	2023-02-01 14:40:55.000000000 +0100
-+++ monitoring-plugins-2.3.3/plugins/check_users.c	2023-06-15 16:16:34.879700400 +0200
-@@ -48,6 +48,11 @@
+diff --git a/plugins/Makefile.am b/plugins/Makefile.am
+index ab59eb730..49086b7a6 100644
+--- a/plugins/Makefile.am
++++ b/plugins/Makefile.am
+@@ -112,7 +112,7 @@ check_tcp_LDADD = $(SSLOBJS)
+ check_time_LDADD = $(NETLIBS)
+ check_ntp_time_LDADD = $(NETLIBS) $(MATHLIBS)
+ check_ups_LDADD = $(NETLIBS)
+-check_users_LDADD = $(BASEOBJS) $(WTSAPI32LIBS)
++check_users_LDADD = $(BASEOBJS) $(WTSAPI32LIBS) $(SYSTEMDLIBS)
+ check_by_ssh_LDADD = $(NETLIBS)
+ check_ide_smart_LDADD = $(BASEOBJS)
+ negate_LDADD = $(BASEOBJS)
+diff --git a/plugins/check_users.c b/plugins/check_users.c
+index f6f4b3620..2a9ee986d 100644
+--- a/plugins/check_users.c
++++ b/plugins/check_users.c
+@@ -1,33 +1,33 @@
+ /*****************************************************************************
+-* 
++*
+ * Monitoring check_users plugin
+-* 
++*
+ * License: GPL
+ * Copyright (c) 2000-2012 Monitoring Plugins Development Team
+-* 
++*
+ * Description:
+-* 
++*
+ * This file contains the check_users plugin
+-* 
++*
+ * This plugin checks the number of users currently logged in on the local
+ * system and generates an error if the number exceeds the thresholds
+ * specified.
+-* 
+-* 
++*
++*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+-* 
++*
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+-* 
++*
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+-* 
+-* 
++*
++*
+ *****************************************************************************/
+ 
+ const char *progname = "check_users";
+@@ -48,6 +48,11 @@ const char *email = "devel@monitoring-plugins.org";
  # include "popen.h"
  #endif
  
@@ -41,38 +115,35 @@ diff -wur monitoring-plugins-2.3.3.old/plugins/check_users.c monitoring-plugins-
  #define possibly_set(a,b) ((a) == 0 ? (b) : 0)
  
  int process_arguments (int, char **);
-@@ -115,6 +120,11 @@
+@@ -85,6 +90,11 @@ main (int argc, char **argv)
  
- 	WTSFreeMemory(wtsinfo);
- #elif HAVE_UTMPX_H
+ 	users = 0;
+ 
 +#ifdef HAVE_LIBSYSTEMD
 +	if (sd_booted () > 0)
 +	        users = sd_get_sessions (NULL);
 +	else {
 +#endif
- 	/* get currently logged users from utmpx */
- 	setutxent ();
- 
-@@ -123,6 +133,9 @@
- 			users++;
- 
- 	endutxent ();
+ #if HAVE_WTSAPI32_H
+ 	if (!WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE,
+ 	  0, 1, &wtsinfo, &wtscount)) {
+@@ -156,6 +166,9 @@ main (int argc, char **argv)
+ 	if (spclose (child_process))
+ 		result = possibly_set (result, STATE_UNKNOWN);
+ #endif
 +#ifdef HAVE_LIBSYSTEMD
 +	}
 +#endif
- #else
- 	/* run the command */
- 	child_process = spopen (WHO_COMMAND);
-Nur in monitoring-plugins-2.3.3/plugins: check_users.c~.
-diff -wur monitoring-plugins-2.3.3.old/plugins/Makefile.am monitoring-plugins-2.3.3/plugins/Makefile.am
---- monitoring-plugins-2.3.3.old/plugins/Makefile.am	2023-02-01 14:40:55.000000000 +0100
-+++ monitoring-plugins-2.3.3/plugins/Makefile.am	2023-06-15 16:23:36.925699810 +0200
-@@ -112,7 +112,7 @@
- check_time_LDADD = $(NETLIBS)
- check_ntp_time_LDADD = $(NETLIBS) $(MATHLIBS)
- check_ups_LDADD = $(NETLIBS)
--check_users_LDADD = $(BASEOBJS) $(WTSAPI32LIBS)
-+check_users_LDADD = $(BASEOBJS) $(WTSAPI32LIBS) $(SYSTEMDLIBS)
- check_by_ssh_LDADD = $(NETLIBS)
- check_ide_smart_LDADD = $(BASEOBJS)
- negate_LDADD = $(BASEOBJS)
+ 
+ 	/* check the user count against warning and critical thresholds */
+ 	result = get_status((double)users, thlds);
+@@ -163,7 +176,7 @@ main (int argc, char **argv)
+ 	if (result == STATE_UNKNOWN)
+ 		printf ("%s\n", _("Unable to read output"));
+ 	else {
+-		printf (_("USERS %s - %d users currently logged in |%s\n"), 
++		printf (_("USERS %s - %d users currently logged in |%s\n"),
+ 				state_text(result), users,
+ 				sperfdata_int("users", users, "", warning_range,
+ 							critical_range, TRUE, 0, FALSE, 0));
+ 

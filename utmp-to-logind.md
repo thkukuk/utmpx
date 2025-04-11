@@ -47,7 +47,23 @@ count_users(void)
   struct utmp *ut;
 
   if (sd_booted() > 0) {
-    numuser = sd_get_sessions(NULL);
+    char **sessions_list;
+    int sessions = sd_get_sessions(&sessions_list);
+
+    if (sessions > 0) {
+      for (int i = 0; i < sessions; i++) {
+        char *class;
+
+        if (sd_session_get_class(sessions_list[i], &class) < 0)
+          continue;
+
+        if (strncmp(class, "user", 4) == 0) // user, user-early, user-incomplete
+          numuser++;
+        free(class);
+	free(sessions_list[i]);
+      }
+      free(sessions_list);
+    }
   } else {
     setutent();
     while ((ut = getutent())) {

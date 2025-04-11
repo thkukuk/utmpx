@@ -9,6 +9,10 @@ This repository contains the document with all background informations and patch
 * [Y2038 and utmp/wtmp/lastlog on bi-arch systems like x86-64](Y2038.md)
 * [Mapping of struct utmp to libsystemd functions](utmp-to-logind.md)
 
+## Debug utilitiy
+
+[logindump](logindump) is a debug utility which dumps the data from `systemd-logind`, `wtmpdb`, `utmp` and `wtmp`.
+
 ## Patches
 Packages for which patches exist:
 * [coreutils](patches/coreutils/)

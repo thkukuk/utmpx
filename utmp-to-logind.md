@@ -67,7 +67,7 @@ An overview, which libsystemd function corresponds with which utmp entry
 
 | struct utmp | libsystemd | comment |
 |-------------|------------|---------|
-| ut_type | - | Only `USER_PROCESS` is available|
+| ut_type | sd_session_get_class() | There is no 1:1 mapping, but `USER_PROCESS` maps to `user`. |
 | ut_pid  | sd_session_get_leader()[^1] ||
 | ut_line | sd_session_get_tty() ||
 | ut_id   | session_id |
